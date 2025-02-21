@@ -5,8 +5,8 @@ Generating OpenSCAD code...
 
 Successfully created output.scad
 Style settings used:
-  merge_distance: 2.0
+  merge_distance: 3.0
   cluster_size: 3.0
   height_variance: 0.2
-  detail_level: 1.0
-  artistic_style: modern
+  detail_level: 0.3
+  artistic_style: classic

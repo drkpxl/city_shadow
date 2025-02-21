@@ -4,7 +4,7 @@ from .geometry import GeometryUtils
 
 class StyleManager:
     def __init__(self, style_settings=None):
-        self.border_width = 5
+        self.border_width = 0
         self.base_height = 10
         self.geometry = GeometryUtils()
         

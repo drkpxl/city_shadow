@@ -192,12 +192,22 @@ class FeatureProcessor:
                 'coords': transformed,
                 'height': height
             })
+        # Handle parking features explicitly:
+        elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
+            features['roads'].append({
+                'coords': transformed,
+                'is_parking': True
+            })
         elif 'highway' in props:
-            features['roads'].append(transformed)
+            features['roads'].append({
+                'coords': transformed,
+                'is_parking': False
+            })
         elif 'railway' in props:
             features['railways'].append(transformed)
         elif 'natural' in props and props['natural'] == 'water':
             features['water'].append(transformed)
+
 ```
 
 # lib/geometry.py
@@ -386,14 +396,24 @@ union() {{
         road_width = layer_specs['roads']['width']
         
         for i, road in enumerate(road_features):
-            points = self.geometry.generate_buffered_polygon(road, road_width)
-            if points:
+            # Ensure we have a list of coordinates regardless of type
+            if isinstance(road, dict):
+                pts = road.get('coords', road)
+                if road.get('is_parking'):
+                    points_str = self.geometry.generate_polygon_points(pts)
+                else:
+                    points_str = self.geometry.generate_buffered_polygon(pts, road_width)
+            else:
+                pts = road
+                points_str = self.geometry.generate_buffered_polygon(pts, road_width)
+                
+            if points_str:
                 scad.extend([
                     f'''
         // Road {i+1}
         translate([0, 0, {base_height - road_depth}])
             linear_extrude(height={road_depth + 0.1}, convexity=2)
-                polygon([{points}]);'''
+                polygon([{points_str}]);'''
                 ])
         
         return scad
@@ -481,6 +501,7 @@ union() {{
             return f'''
                 linear_extrude(height={height}, convexity=2)
                     polygon([{points_str}]);'''
+
 ```
 
 # lib/style_manager.py
@@ -492,7 +513,7 @@ from .geometry import GeometryUtils
 
 class StyleManager:
     def __init__(self, style_settings=None):
-        self.border_width = 5
+        self.border_width = 0
         self.base_height = 10
         self.geometry = GeometryUtils()
         
@@ -703,11 +724,11 @@ Generating OpenSCAD code...
 
 Successfully created output.scad
 Style settings used:
-  merge_distance: 2.0
+  merge_distance: 3.0
   cluster_size: 3.0
   height_variance: 0.2
-  detail_level: 1.0
-  artistic_style: modern
+  detail_level: 0.3
+  artistic_style: classic
 ```
 
 # requirements.txt
