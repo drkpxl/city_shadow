@@ -1,4 +1,3 @@
-# lib/style_manager.py
 from math import log10, sin, cos, pi, atan2
 from .geometry import GeometryUtils
 
@@ -14,7 +13,8 @@ class StyleManager:
             'cluster_size': 3.0,
             'height_variance': 0.2,
             'detail_level': 1.0,
-            'artistic_style': 'modern'
+            'artistic_style': 'modern',
+            'min_building_area': 600.0  # NEW: default minimum area in m²
         }
         
         # Override defaults with provided settings

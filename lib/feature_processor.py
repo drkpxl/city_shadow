@@ -1,4 +1,3 @@
-# lib/feature_processor.py
 from .geometry import GeometryUtils
 
 class FeatureProcessor:
@@ -37,10 +36,18 @@ class FeatureProcessor:
         if not coords:
             return
             
-        transformed = [transform(lon, lat) for lon, lat in coords]
-        
-        # Categorize and process feature
+        # If this is a building, check its real-world area:
         if 'building' in props:
+            area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+            # Retrieve the minimum area threshold from style settings
+            min_area = self.style_manager.style.get('min_building_area', 600.0)
+            
+            if area_m2 < min_area:
+                # Skip buildings smaller than the threshold
+                return
+            
+            # Otherwise, transform coordinates and store the building
+            transformed = [transform(lon, lat) for lon, lat in coords]
             height = self.style_manager.scale_building_height(props)
             features['buildings'].append({
                 'coords': transformed,
@@ -48,16 +55,20 @@ class FeatureProcessor:
             })
         # Handle parking features explicitly:
         elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['roads'].append({
                 'coords': transformed,
                 'is_parking': True
             })
         elif 'highway' in props:
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['roads'].append({
                 'coords': transformed,
                 'is_parking': False
             })
         elif 'railway' in props:
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['railways'].append(transformed)
         elif 'natural' in props and props['natural'] == 'water':
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['water'].append(transformed)

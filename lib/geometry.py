@@ -1,5 +1,4 @@
-# lib/geometry.py
-from math import sqrt, sin, cos, pi, atan2
+from math import sqrt, sin, cos, pi, atan2, radians
 
 class GeometryUtils:
     def create_coordinate_transformer(self, features, border_width, size):
@@ -56,7 +55,7 @@ class GeometryUtils:
         return sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
     def calculate_polygon_area(self, points):
-        """Calculate area of a polygon"""
+        """Calculate area of a polygon using the shoelace formula on transformed coordinates"""
         area = 0.0
         j = len(points) - 1
         for i in range(len(points)):
@@ -107,3 +106,35 @@ class GeometryUtils:
         polygon_points = left_side + list(reversed(right_side))
         return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in polygon_points)
 
+    def approximate_polygon_area_m2(self, coords):
+        """
+        Approximate the area of a lat/lon polygon in square meters
+        using a simple equirectangular projection and the shoelace formula.
+        """
+        if len(coords) < 3:
+            return 0.0
+        
+        # Calculate the center for projection
+        lons = [pt[0] for pt in coords]
+        lats = [pt[1] for pt in coords]
+        lon_center = sum(lons) / len(lons)
+        lat_center = sum(lats) / len(lats)
+        
+        R = 6371000.0  # Earth radius in meters
+        
+        # Convert each coordinate to x, y relative to the center
+        xy_points = []
+        for lon, lat in coords:
+            x = radians(lon - lon_center) * R * cos(radians(lat_center))
+            y = radians(lat - lat_center) * R
+            xy_points.append((x, y))
+        
+        # Calculate area using the shoelace formula
+        area = 0.0
+        n = len(xy_points)
+        for i in range(n):
+            j = (i + 1) % n
+            area += xy_points[i][0] * xy_points[j][1]
+            area -= xy_points[j][0] * xy_points[i][1]
+        
+        return abs(area) / 2.0
