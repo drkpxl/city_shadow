@@ -46,8 +46,17 @@ class FeatureProcessor:
                 'coords': transformed,
                 'height': height
             })
+        # Handle parking features explicitly:
+        elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
+            features['roads'].append({
+                'coords': transformed,
+                'is_parking': True
+            })
         elif 'highway' in props:
-            features['roads'].append(transformed)
+            features['roads'].append({
+                'coords': transformed,
+                'is_parking': False
+            })
         elif 'railway' in props:
             features['railways'].append(transformed)
         elif 'natural' in props and props['natural'] == 'water':

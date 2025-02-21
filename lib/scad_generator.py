@@ -66,14 +66,24 @@ union() {{
         road_width = layer_specs['roads']['width']
         
         for i, road in enumerate(road_features):
-            points = self.geometry.generate_buffered_polygon(road, road_width)
-            if points:
+            # Ensure we have a list of coordinates regardless of type
+            if isinstance(road, dict):
+                pts = road.get('coords', road)
+                if road.get('is_parking'):
+                    points_str = self.geometry.generate_polygon_points(pts)
+                else:
+                    points_str = self.geometry.generate_buffered_polygon(pts, road_width)
+            else:
+                pts = road
+                points_str = self.geometry.generate_buffered_polygon(pts, road_width)
+                
+            if points_str:
                 scad.extend([
                     f'''
         // Road {i+1}
         translate([0, 0, {base_height - road_depth}])
             linear_extrude(height={road_depth + 0.1}, convexity=2)
-                polygon([{points}]);'''
+                polygon([{points_str}]);'''
                 ])
         
         return scad

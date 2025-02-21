@@ -34,13 +34,13 @@ class StyleManager:
                 'inset': self.border_width
             },
             'railways': {
-                'depth': 0.6,
+                'depth': 1.4,
                 'width': 1.5,
                 'inset': self.border_width
             },
             'buildings': {
                 'min_height': 2,
-                'max_height': 10
+                'max_height': 6
             },
             'base': {
                 'height': self.base_height,
@@ -54,7 +54,7 @@ class StyleManager:
 
     def scale_building_height(self, properties):
         """Scale building height using log scaling"""
-        default_height = 15
+        default_height = 5
         
         height_m = None
         if 'height' in properties:

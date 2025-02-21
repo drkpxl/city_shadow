@@ -1,3 +1,5 @@
 output.scad
 *.geojson
 *.scad
+SL_export_clipped.geojson
+*.stl

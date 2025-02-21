@@ -88,7 +88,7 @@ class EnhancedCityConverter:
         self.style_manager = StyleManager(style_settings)
         self.feature_processor = FeatureProcessor(self.style_manager)
         self.scad_generator = ScadGenerator(self.style_manager)
-        self.debug = False
+        self.debug = True
         self.debug_log = []
         
         # Initialize layer specifications
@@ -111,14 +111,6 @@ class EnhancedCityConverter:
             # Process features
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
-            
-            if not features:
-                features = {
-                    'water': [],
-                    'roads': [],
-                    'railways': [],
-                    'buildings': []
-                }
             
             # Generate OpenSCAD code
             self.print_debug("\nGenerating OpenSCAD code...")
@@ -327,7 +319,8 @@ class GeometryUtils:
 
 ```py
 # lib/scad_generator.py
-# Fixed ScadGenerator class
+from .geometry import GeometryUtils
+
 class ScadGenerator:
     def __init__(self, style_manager):
         self.style_manager = style_manager
@@ -335,10 +328,24 @@ class ScadGenerator:
 
     def generate_openscad(self, features, size, layer_specs):
         """Generate complete OpenSCAD code with all features"""
-        scad = []
+        # Start with header and base
+        scad = self._generate_header(size, layer_specs)
         
-        # Header
-        scad.extend([
+        # Add features
+        scad.extend(self._generate_water_features(features['water'], layer_specs))
+        scad.append('        }')  # Close water features union
+        scad.extend(self._generate_road_features(features['roads'], layer_specs))
+        scad.extend(self._generate_railway_features(features['railways'], layer_specs))
+        scad.append('    }')  # Close main difference
+        scad.extend(self._generate_building_features(features['buildings'], layer_specs))
+        
+        # Close main union
+        scad.append('}')
+        return '\n'.join(scad)
+
+    def _generate_header(self, size, layer_specs):
+        """Generate OpenSCAD file header and base structure"""
+        return [
             f'''// Generated with Enhanced City Converter
 // Style: {self.style_manager.style['artistic_style']}
 // Detail Level: {self.style_manager.style['detail_level']}
@@ -348,103 +355,132 @@ union() {{
         // Base
         cube([{size}, {size}, {layer_specs['base']['height']}]);
         
-        // Subtractive features
-        union() {{'''])
+        // Start features
+        union() {{'''
+        ]
+
+    def _generate_water_features(self, water_features, layer_specs):
+        """Generate OpenSCAD code for water features"""
+        scad = []
+        base_height = layer_specs['base']['height']
+        water_depth = layer_specs['water']['depth']
         
-        # Add water features
-        if features.get('water'):
-            for i, water in enumerate(features['water']):
-                points_str = self.geometry.generate_polygon_points(water)
-                if points_str:
-                    scad.extend([f'''
-                // Water body {i+1}
-                translate([0, 0, {layer_specs['base']['height'] - layer_specs['water']['depth']}])
-                    linear_extrude(height={layer_specs['water']['depth'] + 0.1}, convexity=2)
-                        polygon([{points_str}]);'''])
+        for i, water in enumerate(water_features):
+            points_str = self.geometry.generate_polygon_points(water)
+            if points_str:
+                scad.extend([
+                    f'''
+            // Water body {i+1}
+            translate([0, 0, {base_height - water_depth}])
+                linear_extrude(height={water_depth + 0.1}, convexity=2)
+                    polygon([{points_str}]);'''
+                ])
         
-        # Add road features
-        if features.get('roads'):
-            for i, road in enumerate(features['roads']):
-                points = self.geometry.generate_buffered_polygon(road, layer_specs['roads']['width'])
-                if points:
-                    scad.extend([f'''
-                // Road {i+1}
-                translate([0, 0, {layer_specs['base']['height'] - layer_specs['roads']['depth']}])
-                    linear_extrude(height={layer_specs['roads']['depth'] + 0.1}, convexity=2)
-                        polygon([{points}]);'''])
+        return scad
+
+    def _generate_road_features(self, road_features, layer_specs):
+        """Generate OpenSCAD code for road features"""
+        scad = []
+        base_height = layer_specs['base']['height']
+        road_depth = layer_specs['roads']['depth']
+        road_width = layer_specs['roads']['width']
         
-        # Add railway features
-        if features.get('railways'):
-            for i, railway in enumerate(features['railways']):
-                points = self.geometry.generate_buffered_polygon(railway, layer_specs['railways']['width'])
-                if points:
-                    scad.extend([f'''
-                // Railway {i+1}
-                translate([0, 0, {layer_specs['base']['height'] - layer_specs['railways']['depth']}])
-                    linear_extrude(height={layer_specs['railways']['depth'] + 0.1}, convexity=2)
-                        polygon([{points}]);'''])
+        for i, road in enumerate(road_features):
+            points = self.geometry.generate_buffered_polygon(road, road_width)
+            if points:
+                scad.extend([
+                    f'''
+        // Road {i+1}
+        translate([0, 0, {base_height - road_depth}])
+            linear_extrude(height={road_depth + 0.1}, convexity=2)
+                polygon([{points}]);'''
+                ])
         
-        # Close subtractive features union and difference
-        scad.extend(['''
-        }
-    }'''])
+        return scad
+
+    def _generate_railway_features(self, railway_features, layer_specs):
+        """Generate OpenSCAD code for railway features"""
+        scad = []
+        base_height = layer_specs['base']['height']
+        railway_depth = layer_specs['railways']['depth']
+        railway_width = layer_specs['railways']['width']
         
-        # Add building features
-        if features.get('buildings'):
-            for i, building in enumerate(features['buildings']):
-                points_str = self.geometry.generate_polygon_points(building['coords'])
-                if not points_str:
-                    continue
-                    
-                is_cluster = building.get('is_cluster', False)
-                building_height = building['height']
+        for i, railway in enumerate(railway_features):
+            points = self.geometry.generate_buffered_polygon(railway, railway_width)
+            if points:
+                scad.extend([
+                    f'''
+        // Railway {i+1}
+        translate([0, 0, {base_height - railway_depth}])
+            linear_extrude(height={railway_depth + 0.1}, convexity=2)
+                polygon([{points}]);'''
+                ])
+        
+        return scad
+
+    def _generate_building_features(self, building_features, layer_specs):
+        """Generate OpenSCAD code for building features"""
+        scad = []
+        base_height = layer_specs['base']['height']
+        
+        for i, building in enumerate(building_features):
+            points_str = self.geometry.generate_polygon_points(building['coords'])
+            if not points_str:
+                continue
                 
-                details = self._generate_building_details(points_str, building_height, is_cluster)
-                
-                scad.extend([f'''
+            is_cluster = building.get('is_cluster', False)
+            building_height = building['height']
+            
+            # Generate building with appropriate style
+            details = self._generate_building_details(
+                points_str, 
+                building_height, 
+                is_cluster
+            )
+            
+            scad.extend([
+                f'''
     // {"Building Cluster" if is_cluster else "Building"} {i+1}
-    translate([0, 0, {layer_specs['base']['height']}]) {{
+    translate([0, 0, {base_height}]) {{
         {details}
-    }}'''])
+    }}'''
+            ])
         
-        # Close main union
-        scad.append('}')
-        
-        return '\n'.join(scad)
+        return scad
 
     def _generate_building_details(self, points_str, height, is_cluster):
         """Generate architectural details based on style"""
         if not is_cluster or self.style_manager.style['detail_level'] < 0.5:
             return f'''
-        linear_extrude(height={height}, convexity=2)
-            polygon([{points_str}]);'''
+                linear_extrude(height={height}, convexity=2)
+                    polygon([{points_str}]);'''
             
         if self.style_manager.style['artistic_style'] == 'modern':
             return f'''
-        union() {{
-            linear_extrude(height={height}, convexity=2)
-                polygon([{points_str}]);
-            translate([0, 0, {height}])
-                linear_extrude(height=0.8, convexity=2)
-                    offset(r=-0.8)
+                union() {{
+                    linear_extrude(height={height}, convexity=2)
                         polygon([{points_str}]);
-        }}'''
+                    translate([0, 0, {height}])
+                        linear_extrude(height=0.8, convexity=2)
+                            offset(r=-0.8)
+                                polygon([{points_str}]);
+                }}'''
                 
         elif self.style_manager.style['artistic_style'] == 'classic':
             return f'''
-        union() {{
-            linear_extrude(height={height}, convexity=2)
-                polygon([{points_str}]);
-            translate([0, 0, {height * 0.8}])
-                linear_extrude(height={height * 0.2}, convexity=2)
-                    offset(r=-0.5)
+                union() {{
+                    linear_extrude(height={height}, convexity=2)
                         polygon([{points_str}]);
-        }}'''
+                    translate([0, 0, {height * 0.8}])
+                        linear_extrude(height={height * 0.2}, convexity=2)
+                            offset(r=-0.5)
+                                polygon([{points_str}]);
+                }}'''
         
         else:  # minimal
             return f'''
-        linear_extrude(height={height}, convexity=2)
-            polygon([{points_str}]);'''
+                linear_extrude(height={height}, convexity=2)
+                    polygon([{points_str}]);'''
 ```
 
 # lib/style_manager.py
@@ -486,13 +522,13 @@ class StyleManager:
                 'inset': self.border_width
             },
             'railways': {
-                'depth': 0.6,
+                'depth': 1.4,
                 'width': 1.5,
                 'inset': self.border_width
             },
             'buildings': {
                 'min_height': 2,
-                'max_height': 10
+                'max_height': 6
             },
             'base': {
                 'height': self.base_height,
@@ -506,7 +542,7 @@ class StyleManager:
 
     def scale_building_height(self, properties):
         """Scale building height using log scaling"""
-        default_height = 15
+        default_height = 5
         
         height_m = None
         if 'height' in properties:
