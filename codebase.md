@@ -23,108 +23,166 @@ from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
 from lib.preview import OpenSCADIntegration
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert GeoJSON to artistic 3D city model'
+        description="Convert GeoJSON to artistic 3D city model"
     )
     # Basic arguments
-    parser.add_argument('input_json', help='Input GeoJSON file')
-    parser.add_argument('output_scad', help='Output OpenSCAD file')
-    parser.add_argument('--size', type=float, default=200,
-                        help='Size in mm (default: 200)')
-    parser.add_argument('--height', type=float, default=20,
-                        help='Maximum height in mm (default: 20)')
-    parser.add_argument('--style', choices=['modern', 'classic', 'minimal'],
-                        default='modern', help='Artistic style')
-    parser.add_argument('--detail', type=float, default=1.0,
-                        help='Detail level 0-2 (default: 1.0)')
-    parser.add_argument('--merge-distance', type=float, default=2.0,
-                        help='Distance threshold for merging buildings (default: 2.0)')
-    parser.add_argument('--cluster-size', type=float, default=3.0,
-                        help='Size threshold for building clusters (default: 3.0)')
-    parser.add_argument('--height-variance', type=float, default=0.2,
-                        help='Height variation 0-1 (default: 0.2)')
-    parser.add_argument('--road-width', type=float, default=2.0,
-                        help='Width of roads in mm (default: 2.0)')
-    parser.add_argument('--water-depth', type=float, default=1.4,
-                        help='Depth of water features in mm (default: 1.4)')
-    parser.add_argument('--min-building-area', type=float, default=600.0,
-                        help='Minimum building footprint area in m^2 (default: 600)')
-    parser.add_argument('--debug', action='store_true',
-                        help='Enable debug output')
+    parser.add_argument("input_json", help="Input GeoJSON file")
+    parser.add_argument("output_scad", help="Output OpenSCAD file")
+    parser.add_argument(
+        "--size", type=float, default=200, help="Size in mm (default: 200)"
+    )
+    parser.add_argument(
+        "--height", type=float, default=20, help="Maximum height in mm (default: 20)"
+    )
+    parser.add_argument(
+        "--style",
+        choices=["modern", "classic", "minimal", "block-combine"],
+        default="modern",
+        help="Artistic style",
+    )
+    parser.add_argument(
+        "--detail", type=float, default=1.0, help="Detail level 0-2 (default: 1.0)"
+    )
+    parser.add_argument(
+        "--merge-distance",
+        type=float,
+        default=2.0,
+        help="Distance threshold for merging buildings (default: 2.0)",
+    )
+    parser.add_argument(
+        "--cluster-size",
+        type=float,
+        default=3.0,
+        help="Size threshold for building clusters (default: 3.0)",
+    )
+    parser.add_argument(
+        "--height-variance",
+        type=float,
+        default=0.2,
+        help="Height variation 0-1 (default: 0.2)",
+    )
+    parser.add_argument(
+        "--road-width",
+        type=float,
+        default=2.0,
+        help="Width of roads in mm (default: 2.0)",
+    )
+    parser.add_argument(
+        "--water-depth",
+        type=float,
+        default=1.4,
+        help="Depth of water features in mm (default: 1.4)",
+    )
+    parser.add_argument(
+        "--min-building-area",
+        type=float,
+        default=600.0,
+        help="Minimum building footprint area in m^2 (default: 600)",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
     # Preprocessing arguments
-    preprocess_group = parser.add_argument_group('Preprocessing options')
-    preprocess_group.add_argument('--preprocess', action='store_true',
-                               help='Enable GeoJSON preprocessing')
-    preprocess_group.add_argument('--crop-distance', type=float,
-                               help='Distance in meters from center to crop features')
-    preprocess_group.add_argument('--crop-bbox', type=float, nargs=4,
-                               metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
-                               help='Bounding box coordinates for cropping')
+    preprocess_group = parser.add_argument_group("Preprocessing options")
+    preprocess_group.add_argument(
+        "--preprocess", action="store_true", help="Enable GeoJSON preprocessing"
+    )
+    preprocess_group.add_argument(
+        "--crop-distance",
+        type=float,
+        help="Distance in meters from center to crop features",
+    )
+    preprocess_group.add_argument(
+        "--crop-bbox",
+        type=float,
+        nargs=4,
+        metavar=("SOUTH", "WEST", "NORTH", "EAST"),
+        help="Bounding box coordinates for cropping",
+    )
 
     # Export format group
-    export_group = parser.add_argument_group('Export Options')
-    export_group.add_argument('--export', choices=['preview', 'stl', 'both'],
-                          help='Export format (preview image, STL, or both)')
-    export_group.add_argument('--output-stl',
-                          help='Output STL filename (default: based on SCAD filename)')
-    export_group.add_argument('--no-repair', action='store_true',
-                          help='Disable automatic geometry repair attempts')
-    export_group.add_argument('--force', action='store_true',
-                          help='Force STL generation even if validation fails')
-    
+    export_group = parser.add_argument_group("Export Options")
+    export_group.add_argument(
+        "--export",
+        choices=["preview", "stl", "both"],
+        help="Export format (preview image, STL, or both)",
+    )
+    export_group.add_argument(
+        "--output-stl", help="Output STL filename (default: based on SCAD filename)"
+    )
+    export_group.add_argument(
+        "--no-repair",
+        action="store_true",
+        help="Disable automatic geometry repair attempts",
+    )
+    export_group.add_argument(
+        "--force",
+        action="store_true",
+        help="Force STL generation even if validation fails",
+    )
+
     # Preview options
-    preview_group = parser.add_argument_group('Preview and Integration')
-    preview_group.add_argument('--preview-size', type=int, nargs=2, 
-                            metavar=('WIDTH', 'HEIGHT'),
-                            default=[1920, 1080],
-                            help='Preview image size in pixels')
-    preview_group.add_argument('--preview-file',
-                            help='Preview image filename (default: based on SCAD filename)')
-    preview_group.add_argument('--watch', action='store_true',
-                            help='Watch SCAD file and auto-reload in OpenSCAD')
-    preview_group.add_argument('--openscad-path',
-                            help='Path to OpenSCAD executable')
+    preview_group = parser.add_argument_group("Preview and Integration")
+    preview_group.add_argument(
+        "--preview-size",
+        type=int,
+        nargs=2,
+        metavar=("WIDTH", "HEIGHT"),
+        default=[1920, 1080],
+        help="Preview image size in pixels",
+    )
+    preview_group.add_argument(
+        "--preview-file",
+        help="Preview image filename (default: based on SCAD filename)",
+    )
+    preview_group.add_argument(
+        "--watch",
+        action="store_true",
+        help="Watch SCAD file and auto-reload in OpenSCAD",
+    )
+    preview_group.add_argument("--openscad-path", help="Path to OpenSCAD executable")
 
     args = parser.parse_args()
 
     try:
         # Initialize style settings
         style_settings = {
-            'artistic_style': args.style,
-            'detail_level': args.detail,
-            'merge_distance': args.merge_distance,
-            'cluster_size': args.cluster_size,
-            'height_variance': args.height_variance,
-            'min_building_area': args.min_building_area
+            "artistic_style": args.style,
+            "detail_level": args.detail,
+            "merge_distance": args.merge_distance,
+            "cluster_size": args.cluster_size,
+            "height_variance": args.height_variance,
+            "min_building_area": args.min_building_area,
         }
 
         # Create converter instance
         converter = EnhancedCityConverter(
-            size_mm=args.size,
-            max_height_mm=args.height,
-            style_settings=style_settings
+            size_mm=args.size, max_height_mm=args.height, style_settings=style_settings
         )
 
         # Update feature specifications
-        converter.layer_specs['roads']['width'] = args.road_width
-        converter.layer_specs['water']['depth'] = args.water_depth
+        converter.layer_specs["roads"]["width"] = args.road_width
+        converter.layer_specs["water"]["depth"] = args.water_depth
         converter.debug = args.debug
 
         # Preprocess if requested
         if args.preprocess:
             if not (args.crop_distance or args.crop_bbox):
-                parser.error("When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified")
-            
+                parser.error(
+                    "When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified"
+                )
+
             preprocessor = GeoJSONPreprocessor(
-                bbox=args.crop_bbox,
-                distance_meters=args.crop_distance
+                bbox=args.crop_bbox, distance_meters=args.crop_distance
             )
             preprocessor.debug = args.debug
-            
+
             # Process and pass the data directly to converter
-            converter.convert_preprocessed(args.input_json, args.output_scad, preprocessor)
+            converter.convert_preprocessed(
+                args.input_json, args.output_scad, preprocessor
+            )
         else:
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
@@ -132,35 +190,31 @@ def main():
         # Handle exports if requested
         if args.export or args.watch:
             integration = OpenSCADIntegration(args.openscad_path)
-            
-            # Determine output filenames
-            stl_file = args.output_stl or args.output_scad.replace('.scad', '.stl')
-            preview_file = args.preview_file or args.output_scad.replace('.scad', '_preview.png')
 
-            if args.export in ['preview', 'both']:
+            # Determine output filenames
+            stl_file = args.output_stl or args.output_scad.replace(".scad", ".stl")
+            preview_file = args.preview_file or args.output_scad.replace(
+                ".scad", "_preview.png"
+            )
+
+            if args.export in ["preview", "both"]:
                 print("\nGenerating preview image...")
                 integration.generate_preview(
-                    args.output_scad,
-                    preview_file,
-                    size=args.preview_size
+                    args.output_scad, preview_file, size=args.preview_size
                 )
 
-            if args.export in ['stl', 'both']:
+            if args.export in ["stl", "both"]:
                 print("\nGenerating STL file...")
                 try:
                     integration.generate_stl(
-                        args.output_scad,
-                        stl_file,
-                        repair=not args.no_repair
+                        args.output_scad, stl_file, repair=not args.no_repair
                     )
                 except Exception as e:
                     if args.force:
                         print(f"Warning: {str(e)}")
                         print("Forcing STL generation due to --force flag...")
                         integration.generate_stl(
-                            args.output_scad,
-                            stl_file,
-                            repair=False
+                            args.output_scad, stl_file, repair=False
                         )
                     else:
                         raise
@@ -180,13 +234,166 @@ def main():
         print(f"Error: {str(e)}")
         raise
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
+
 ```
 
 # lib/__init__.py
 
 ```py
+
+```
+
+# lib/block_combiner.py
+
+```py
+# lib/block_combiner.py
+from shapely.geometry import Polygon, MultiPolygon, box, LineString, mapping
+from shapely.ops import unary_union, polygonize
+from shapely.validation import make_valid
+from .geometry import GeometryUtils
+
+
+class BlockCombiner:
+    def __init__(self, style_manager):
+        self.style_manager = style_manager
+        self.geometry = GeometryUtils()
+        self.debug = False
+
+    def combine_buildings_by_block(self, features):
+        """
+        Fill each block that has any building coverage.
+        """
+        if self.debug:
+            print("\nStarting block combination process...")
+            print(f"Number of input buildings: {len(features.get('buildings', []))}")
+
+        # Create blocks from road network
+        blocks = self._create_blocks_from_roads(features.get("roads", []))
+        if self.debug:
+            print(f"Created {len(blocks)} blocks from road network")
+
+        # Convert all buildings, no minimum size filtering
+        building_polygons = []
+        for building in features.get("buildings", []):
+            try:
+                # Always try to create polygon, regardless of size
+                poly = Polygon(building["coords"])
+                height = building.get("height", 5.0)  # Default height if not specified
+
+                if poly.is_valid:
+                    building_polygons.append((poly, height))
+                else:
+                    fixed_poly = make_valid(poly)
+                    if isinstance(fixed_poly, MultiPolygon):
+                        for p in fixed_poly.geoms:
+                            if p.is_valid:
+                                building_polygons.append((p, height))
+                    elif fixed_poly.is_valid:
+                        building_polygons.append((fixed_poly, height))
+            except Exception as e:
+                if self.debug:
+                    print(f"Error processing building: {e}")
+                continue
+
+        if self.debug:
+            print(f"Processed {len(building_polygons)} valid building polygons")
+
+        # Create a union of all buildings for coverage checking
+        all_buildings = unary_union([poly for poly, _ in building_polygons])
+        if not all_buildings.is_valid:
+            all_buildings = make_valid(all_buildings)
+
+        combined_buildings = []
+        default_height = 5.0
+
+        # Process each block
+        for block_idx, block in enumerate(blocks):
+            try:
+                # Check for any building intersection, no matter how small
+                if block.intersects(all_buildings):
+                    # Find all buildings in this block
+                    block_heights = []
+                    for building_poly, height in building_polygons:
+                        if block.intersects(building_poly):
+                            intersection = block.intersection(building_poly)
+                            if intersection.area > 0:
+                                block_heights.append((height, intersection.area))
+
+                    # Get block height
+                    if block_heights:
+                        # Use height of largest building
+                        block_height = max(block_heights, key=lambda x: x[1])[0]
+                    else:
+                        block_height = default_height
+
+                    # Create slightly smaller block footprint
+                    block_shape = block.buffer(-0.1)
+                    if block_shape.is_valid:
+                        coords = list(block_shape.exterior.coords)[:-1]
+                        combined_buildings.append(
+                            {"coords": coords, "height": block_height, "is_block": True}
+                        )
+                        if self.debug:
+                            print(f"Added block {block_idx} with height {block_height}")
+
+            except Exception as e:
+                if self.debug:
+                    print(f"Error processing block {block_idx}: {e}")
+                continue
+
+        if self.debug:
+            print(f"\nFinal combined buildings count: {len(combined_buildings)}")
+
+        return combined_buildings
+
+    def _create_blocks_from_roads(self, roads):
+        """
+        Create blocks from road network.
+        """
+        try:
+            road_polys = []
+            road_width = self.style_manager.get_default_layer_specs()["roads"]["width"]
+
+            for road in roads:
+                try:
+                    line = LineString(road["coords"])
+                    buffered = line.buffer(road_width / 2)
+                    if buffered.is_valid:
+                        road_polys.append(buffered)
+                except Exception as e:
+                    if self.debug:
+                        print(f"Error processing road: {e}")
+                    continue
+
+            if not road_polys:
+                return []
+
+            road_union = unary_union(road_polys)
+            if not road_union.is_valid:
+                road_union = make_valid(road_union)
+
+            bounds = road_union.bounds
+            area = box(*bounds)
+            blocks_area = area.difference(road_union)
+
+            if isinstance(blocks_area, MultiPolygon):
+                blocks = [poly for poly in blocks_area.geoms if poly.is_valid]
+            else:
+                blocks = [blocks_area] if blocks_area.is_valid else []
+
+            # No minimum block size filtering
+            if self.debug:
+                print(f"Created {len(blocks)} blocks")
+
+            return blocks
+
+        except Exception as e:
+            if self.debug:
+                print(f"Error creating blocks from roads: {e}")
+            return []
 
 ```
 
@@ -199,6 +406,7 @@ from .feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
 from .style_manager import StyleManager
 
+
 class EnhancedCityConverter:
     def __init__(self, size_mm=200, max_height_mm=20, style_settings=None):
         self.size = size_mm
@@ -208,7 +416,7 @@ class EnhancedCityConverter:
         self.scad_generator = ScadGenerator(self.style_manager)
         self.debug = True
         self.debug_log = []
-        
+
         # Initialize layer specifications
         self.layer_specs = self.style_manager.get_default_layer_specs()
 
@@ -225,48 +433,46 @@ class EnhancedCityConverter:
             # Read input file
             with open(input_file) as f:
                 data = json.load(f)
-            
-            # Process features
+
+            # Process features - this will now handle setting features in style_manager
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
-            
+
             # Generate main model SCAD code
             self.print_debug("\nGenerating main model OpenSCAD code...")
             main_scad = self.scad_generator.generate_openscad(
-                features, 
-                self.size, 
-                self.layer_specs
+                features, self.size, self.layer_specs
             )
-            
+
             # Generate frame SCAD code
             self.print_debug("\nGenerating frame OpenSCAD code...")
             frame_scad = self._generate_frame(self.size, self.max_height)
-            
+
             # Determine output filenames
-            main_file = output_file.replace('.scad', '_main.scad')
-            frame_file = output_file.replace('.scad', '_frame.scad')
-            
+            main_file = output_file.replace(".scad", "_main.scad")
+            frame_file = output_file.replace(".scad", "_frame.scad")
+
             # Write main model
-            with open(main_file, 'w') as f:
+            with open(main_file, "w") as f:
                 f.write(main_scad)
-            
+
             # Write frame
-            with open(frame_file, 'w') as f:
+            with open(frame_file, "w") as f:
                 f.write(frame_scad)
-            
+
             self.print_debug(f"\nSuccessfully created main model: {main_file}")
             self.print_debug(f"Successfully created frame: {frame_file}")
             self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
-            
+
             # Write debug log if needed
             if self.debug:
-                log_file = output_file + '.log'
-                with open(log_file, 'w') as f:
-                    f.write('\n'.join(self.debug_log))
+                log_file = output_file + ".log"
+                with open(log_file, "w") as f:
+                    f.write("\n".join(self.debug_log))
                 self.print_debug(f"\nDebug log written to {log_file}")
-            
+
         except Exception as e:
             print(f"Error: {str(e)}")
             raise
@@ -277,52 +483,52 @@ class EnhancedCityConverter:
             # Read input file
             with open(input_file) as f:
                 data = json.load(f)
-            
+
             # Preprocess the data
             self.print_debug("\nPreprocessing GeoJSON data...")
             processed_data = preprocessor.process_geojson(data)
-            
-            # Process features
+
+            # Process features - this will now handle setting features in style_manager
             self.print_debug("\nProcessing features...")
-            features = self.feature_processor.process_features(processed_data, self.size)
-            
+            features = self.feature_processor.process_features(
+                processed_data, self.size
+            )
+
             # Generate main model SCAD code
             self.print_debug("\nGenerating main model OpenSCAD code...")
             main_scad = self.scad_generator.generate_openscad(
-                features, 
-                self.size, 
-                self.layer_specs
+                features, self.size, self.layer_specs
             )
-            
+
             # Generate frame SCAD code
             self.print_debug("\nGenerating frame OpenSCAD code...")
             frame_scad = self._generate_frame(self.size, self.max_height)
-            
+
             # Determine output filenames
-            main_file = output_file.replace('.scad', '_main.scad')
-            frame_file = output_file.replace('.scad', '_frame.scad')
-            
+            main_file = output_file.replace(".scad", "_main.scad")
+            frame_file = output_file.replace(".scad", "_frame.scad")
+
             # Write main model
-            with open(main_file, 'w') as f:
+            with open(main_file, "w") as f:
                 f.write(main_scad)
-            
+
             # Write frame
-            with open(frame_file, 'w') as f:
+            with open(frame_file, "w") as f:
                 f.write(frame_scad)
-            
+
             self.print_debug(f"\nSuccessfully created main model: {main_file}")
             self.print_debug(f"Successfully created frame: {frame_file}")
             self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
-            
+
             # Write debug log if needed
             if self.debug:
-                log_file = output_file + '.log'
-                with open(log_file, 'w') as f:
-                    f.write('\n'.join(self.debug_log))
+                log_file = output_file + ".log"
+                with open(log_file, "w") as f:
+                    f.write("\n".join(self.debug_log))
                 self.print_debug(f"\nDebug log written to {log_file}")
-            
+
         except Exception as e:
             print(f"Error: {str(e)}")
             raise
@@ -347,12 +553,16 @@ difference() {{
     translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
 }}"""
+
 ```
 
 # lib/feature_processor.py
 
 ```py
 # lib/feature_processor.py
+from shapely.geometry import LineString, Polygon
+from shapely.ops import unary_union
+
 from .geometry import GeometryUtils
 
 
@@ -363,40 +573,66 @@ class FeatureProcessor:
         self.debug = False
 
     def process_features(self, geojson_data, size):
-        """Process and enhance GeoJSON features"""
+        """
+        Process and enhance GeoJSON features.
+        """
+        # Create a transform function from lat/lon to model coordinates
         transform = self.geometry.create_coordinate_transformer(
             geojson_data["features"], size
         )
 
-        features = {"water": [], "roads": [], "railways": [], "buildings": []}
+        # Initialize our feature buckets
+        features = {
+            "water": [],
+            "roads": [],
+            "railways": [],
+            "buildings": [],
+            "bridges": [],
+        }
 
-        # Process each feature type
+        # Loop through each GeoJSON feature and categorize
         for feature in geojson_data["features"]:
             self._process_single_feature(feature, features, transform)
 
-        # Log feature counts if in debug mode
+        # Store features in style manager before any merging
+        self.style_manager.set_current_features(features)
+
+        # If debug is on, print counts
         if self.debug:
             print(f"\nProcessed feature counts:")
             print(f"Water features: {len(features['water'])}")
             print(f"Road features: {len(features['roads'])}")
             print(f"Railway features: {len(features['railways'])}")
             print(f"Building features: {len(features['buildings'])}")
+            print(f"Bridge features: {len(features['bridges'])}")
 
-        # Apply building merging/clustering
+        # Build one combined geometry for roads, railways, and water
+        barrier_union = self.create_barrier_union(
+            roads=features["roads"],
+            railways=features["railways"],
+            water=features["water"],
+            road_buffer=1.0,
+            railway_buffer=1.0,
+        )
+
+        # Merge buildings using the selected style
         features["buildings"] = self.style_manager.merge_nearby_buildings(
-            features["buildings"]
+            features["buildings"], barrier_union=barrier_union
         )
 
         return features
 
     def _process_single_feature(self, feature, features, transform):
-        """Process a single GeoJSON feature"""
+        """
+        Examine each GeoJSON feature and decide whether it's a building,
+        water feature, road, railway, or bridge, etc., storing it accordingly.
+        """
         props = feature.get("properties", {})
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
-        # If this is a building, check area:
+        # Buildings
         if "building" in props:
             area_m2 = self.geometry.approximate_polygon_area_m2(coords)
             min_area = self.style_manager.style.get("min_building_area", 600.0)
@@ -406,7 +642,7 @@ class FeatureProcessor:
                     print(f"Skipping small building with area {area_m2:.1f}m²")
                 return
 
-            # Transform coordinates and store the building
+            # Transform coordinates
             transformed = [transform(lon, lat) for lon, lat in coords]
             height = self.style_manager.scale_building_height(props)
             features["buildings"].append({"coords": transformed, "height": height})
@@ -415,16 +651,28 @@ class FeatureProcessor:
                     f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²"
                 )
 
-        # Handle roads (excluding tunnels)
+        # Roads / Bridges
         elif "highway" in props:
-            # Skip if it's a tunnel
+            # Skip tunnels
             if props.get("tunnel") in ["yes", "true", "1"]:
                 if self.debug:
                     print(f"Skipping tunnel road of type '{props.get('highway')}'")
                 return
 
             transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 2:  # Ensure we have enough points for a road
+            if len(transformed) < 2:
+                return
+
+            if props.get("bridge") in ["yes", "true", "1"]:
+                # Mark as a bridge
+                bridge_type = props.get("highway", "bridge")
+                features["bridges"].append({"coords": transformed, "type": bridge_type})
+                if self.debug:
+                    print(
+                        f"Added bridge of type '{bridge_type}' with {len(transformed)} points"
+                    )
+            else:
+                # Normal road
                 road_type = props.get("highway", "unknown")
                 features["roads"].append(
                     {"coords": transformed, "type": road_type, "is_parking": False}
@@ -434,49 +682,76 @@ class FeatureProcessor:
                         f"Added road of type '{road_type}' with {len(transformed)} points"
                     )
 
-        # Handle parking areas and service roads
+        # Parking areas
         elif (
             props.get("amenity") == "parking"
             or props.get("parking") == "surface"
             or props.get("service") == "parking_aisle"
         ):
             transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 3:  # Ensure we have enough points for a polygon
+            if len(transformed) >= 3:  # polygon
                 features["roads"].append(
                     {"coords": transformed, "type": "parking", "is_parking": True}
                 )
                 if self.debug:
                     print(f"Added parking area with {len(transformed)} points")
 
-        # Handle railways (excluding tunnels)
+        # Railways (excluding tunnels)
         elif "railway" in props:
-            # Skip if it's a tunnel
             if props.get("tunnel") in ["yes", "true", "1"]:
                 if self.debug:
                     print(f"Skipping tunnel railway of type '{props.get('railway')}'")
                 return
 
             transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 2:  # Ensure we have enough points
+            if len(transformed) >= 2:
                 features["railways"].append(
                     {"coords": transformed, "type": props.get("railway", "unknown")}
                 )
                 if self.debug:
                     print(
-                        f"Added railway of type '{props.get('railway', 'unknown')}' with {len(transformed)} points"
+                        f"Added railway '{props.get('railway', 'unknown')}' with {len(transformed)} points"
                     )
 
-        # Handle water features
-        elif "natural" in props and props["natural"] == "water":
+        # Water features
+        elif props.get("natural") == "water":
             transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 3:  # Ensure we have enough points for a polygon
+            if len(transformed) >= 3:
                 features["water"].append(
                     {"coords": transformed, "type": props.get("water", "unknown")}
                 )
                 if self.debug:
-                    print(
-                        f"Added water feature of type '{props.get('water', 'unknown')}' with {len(transformed)} points"
-                    )
+                    print(f"Added water feature with {len(transformed)} points")
+
+        # (Add more elif blocks for parks, forests, etc., if needed)
+
+    def create_barrier_union(
+        self, roads, railways, water, road_buffer=2.0, railway_buffer=2.0
+    ):
+        """
+        Combine roads, railways, and water into one shapely geometry (unary_union).
+        """
+        barrier_geoms = []
+
+        # Roads -> buffered lines
+        for road in roads:
+            line = LineString(road["coords"])
+            barrier_geoms.append(line.buffer(road_buffer))
+
+        # Railways -> buffered lines
+        for rail in railways:
+            line = LineString(rail["coords"])
+            barrier_geoms.append(line.buffer(railway_buffer))
+
+        # Water -> polygons (no buffer)
+        for wfeat in water:
+            poly = Polygon(wfeat["coords"])
+            barrier_geoms.append(poly)
+
+        if barrier_geoms:
+            return unary_union(barrier_geoms)
+        else:
+            return None
 
 ```
 
@@ -486,6 +761,7 @@ class FeatureProcessor:
 # lib/geometry.py
 from math import sqrt, sin, cos, pi, atan2, radians
 
+
 class GeometryUtils:
     def create_coordinate_transformer(self, features, size):
         """Create a coordinate transformation function without border inset"""
@@ -493,15 +769,15 @@ class GeometryUtils:
         for feature in features:
             coords = self.extract_coordinates(feature)
             all_coords.extend(coords)
-            
+
         if not all_coords:
-            return lambda lon, lat: [size/2, size/2]
+            return lambda lon, lat: [size / 2, size / 2]
 
         # Calculate bounds
         lons, lats = zip(*all_coords)
         min_lon, max_lon = min(lons), max(lons)
         min_lat, max_lat = min(lats), max(lats)
-        
+
         def transform(lon, lat):
             x = (lon - min_lon) / (max_lon - min_lon) if (max_lon != min_lon) else 0.5
             y = (lat - min_lat) / (max_lat - min_lat) if (max_lat != min_lat) else 0.5
@@ -511,19 +787,26 @@ class GeometryUtils:
 
     def extract_coordinates(self, feature):
         """Extract coordinates from GeoJSON feature"""
-        geometry = feature['geometry']
+        geometry = feature["geometry"]
         coords = []
-        
-        if geometry['type'] == 'Point':
-            coords = [geometry['coordinates']]
-        elif geometry['type'] == 'LineString':
-            coords = geometry['coordinates']
-        elif geometry['type'] == 'Polygon':
-            coords = geometry['coordinates'][0]
-        elif geometry['type'] == 'MultiPolygon':
-            largest = max(geometry['coordinates'], key=lambda p: len(p[0]))
+
+        if geometry["type"] == "Point":
+            coords = [geometry["coordinates"]]
+        elif geometry["type"] == "LineString":
+            coords = geometry["coordinates"]
+        elif geometry["type"] == "Polygon":
+            coords = geometry["coordinates"][0]
+        elif geometry["type"] == "MultiPolygon":
+            # Take the largest polygon by vertex count
+            largest = max(geometry["coordinates"], key=lambda p: len(p[0]))
             coords = largest[0]
-            
+        elif geometry["type"] == "MultiLineString":
+            # Optionally handle multi-linestring
+            # Here you might want to merge or just pick the largest ring
+            # For simplicity, let's just flatten them
+            for line in geometry["coordinates"]:
+                coords.extend(line)
+
         return coords
 
     def calculate_centroid(self, points):
@@ -534,10 +817,10 @@ class GeometryUtils:
 
     def calculate_distance(self, p1, p2):
         """Calculate distance between two points"""
-        return sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+        return sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
 
     def calculate_polygon_area(self, points):
-        """Calculate area using the shoelace formula on transformed coordinates"""
+        """Calculate area using the shoelace formula on transformed coords"""
         area = 0.0
         j = len(points) - 1
         for i in range(len(points)):
@@ -551,7 +834,7 @@ class GeometryUtils:
             return None
         if points[0] != points[-1]:
             points = points + [points[0]]
-        return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in points)
+        return ", ".join(f"[{p[0]:.3f}, {p[1]:.3f}]" for p in points)
 
     def generate_buffered_polygon(self, points, width):
         """Generate buffered polygon for linear features"""
@@ -560,21 +843,21 @@ class GeometryUtils:
 
         left_side = []
         right_side = []
-        
+
         for i in range(len(points) - 1):
-            p1, p2 = points[i], points[i+1]
+            p1, p2 = points[i], points[i + 1]
             dx = p2[0] - p1[0]
             dy = p2[1] - p1[1]
-            length = sqrt(dx*dx + dy*dy)
+            length = sqrt(dx * dx + dy * dy)
             if length < 0.001:
                 continue
-                
+
             nx = -dy / length * width / 2
             ny = dx / length * width / 2
-            
+
             left_side.append([p1[0] + nx, p1[1] + ny])
             right_side.append([p1[0] - nx, p1[1] - ny])
-            
+
             if i == len(points) - 2:  # Last segment
                 left_side.append([p2[0] + nx, p2[1] + ny])
                 right_side.append([p2[0] - nx, p2[1] - ny])
@@ -583,28 +866,28 @@ class GeometryUtils:
             return None
 
         polygon_points = left_side + list(reversed(right_side))
-        return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in polygon_points)
+        return ", ".join(f"[{p[0]:.3f}, {p[1]:.3f}]" for p in polygon_points)
 
     def approximate_polygon_area_m2(self, coords):
         """Approximate the area of a lat/lon polygon in square meters"""
         if len(coords) < 3:
             return 0.0
-        
+
         # Center for projection
         lons = [pt[0] for pt in coords]
         lats = [pt[1] for pt in coords]
         lon_center = sum(lons) / len(lons)
         lat_center = sum(lats) / len(lats)
-        
+
         R = 6371000.0  # Earth radius in meters
-        
+
         # Convert each coordinate to x, y relative to center
         xy_points = []
         for lon, lat in coords:
             x = radians(lon - lon_center) * R * cos(radians(lat_center))
             y = radians(lat - lat_center) * R
             xy_points.append((x, y))
-        
+
         # Shoelace formula
         area = 0.0
         n = len(xy_points)
@@ -612,211 +895,199 @@ class GeometryUtils:
             j = (i + 1) % n
             area += xy_points[i][0] * xy_points[j][1]
             area -= xy_points[j][0] * xy_points[i][1]
-        
+
         return abs(area) / 2.0
+
 ```
 
 # lib/preprocessor.py
 
 ```py
-# lib/preprocessor.py (new file)
-
+# lib/preprocessor.py
 from copy import deepcopy
-from math import radians, cos, sin, sqrt
-import statistics
 import json
+import statistics
+from math import radians, cos, sin, sqrt, pi
+from shapely.geometry import shape, mapping, box, Point
+
 
 class GeoJSONPreprocessor:
     def __init__(self, bbox=None, distance_meters=None):
-        self.bbox = bbox  # [south, west, north, east]
+        """
+        bbox: [south, west, north, east]
+        distance_meters: radius (in meters) to crop from the center
+        """
+        self.bbox = bbox
         self.distance = distance_meters
         self.debug = True
 
-    def is_within_bbox(self, lon, lat):
-        """Check if a point is within the bounding box"""
-        if not self.bbox:
-            return True
-        south, west, north, east = self.bbox
-        return west <= lon <= east and south <= lat <= north
-
-    def is_within_distance(self, lon, lat, center_lon, center_lat):
-        """Check if a point is within the distance bounds from center"""
-        if not self.distance:
-            return True
-        meters_per_degree = 111319.9
-        lat_rad = radians(lat)
-        x = (lon - center_lon) * meters_per_degree * cos(lat_rad)
-        y = (lat - center_lat) * meters_per_degree
-        distance = sqrt(x*x + y*y)
-        return distance <= self.distance
-
-    def is_within_bounds(self, lon, lat, center_lon=None, center_lat=None):
-        """Check if a point is within either bbox or distance bounds"""
-        bbox_check = self.is_within_bbox(lon, lat)
-        if center_lon is not None and center_lat is not None and self.distance:
-            distance_check = self.is_within_distance(lon, lat, center_lon, center_lat)
-            return bbox_check and distance_check
-        return bbox_check
-
-    def extract_coordinates(self, feature):
-        """Extract all coordinates from a feature regardless of geometry type"""
-        geometry = feature['geometry']
-        coords = []
-        
-        if geometry['type'] == 'Point':
-            coords = [geometry['coordinates']]
-        elif geometry['type'] == 'LineString':
-            coords = geometry['coordinates']
-        elif geometry['type'] == 'Polygon':
-            for ring in geometry['coordinates']:
-                coords.extend(ring)
-        elif geometry['type'] == 'MultiPolygon':
-            for polygon in geometry['coordinates']:
-                for ring in polygon:
-                    coords.extend(ring)
-        elif geometry['type'] == 'MultiLineString':
-            for line in geometry['coordinates']:
-                coords.extend(line)
-                
-        return coords
-
-    def crop_feature(self, feature, center_lon=None, center_lat=None):
-        """Crop a feature to the bounded area"""
-        geometry = feature['geometry']
-        
-        if geometry['type'] == 'Point':
-            lon, lat = geometry['coordinates']
-            if self.is_within_bounds(lon, lat, center_lon, center_lat):
-                return feature
-            return None
-            
-        elif geometry['type'] == 'LineString':
-            new_coords = [
-                coord for coord in geometry['coordinates']
-                if self.is_within_bounds(coord[0], coord[1], center_lon, center_lat)
-            ]
-            if len(new_coords) >= 2:
-                new_feature = deepcopy(feature)
-                new_feature['geometry']['coordinates'] = new_coords
-                return new_feature
-            return None
-            
-        elif geometry['type'] in ['Polygon', 'MultiPolygon']:
-            def crop_polygon(coords):
-                new_coords = [
-                    coord for coord in coords
-                    if self.is_within_bounds(coord[0], coord[1], center_lon, center_lat)
-                ]
-                if len(new_coords) >= 3:
-                    if new_coords[0] != new_coords[-1]:
-                        new_coords.append(new_coords[0])
-                    return new_coords
-                return None
-
-            if geometry['type'] == 'Polygon':
-                new_exterior = crop_polygon(geometry['coordinates'][0])
-                if new_exterior:
-                    new_feature = deepcopy(feature)
-                    new_feature['geometry']['coordinates'] = [new_exterior]
-                    return new_feature
-                    
-            else:  # MultiPolygon
-                new_polygons = []
-                for polygon in geometry['coordinates']:
-                    new_poly = crop_polygon(polygon[0])
-                    if new_poly:
-                        new_polygons.append([new_poly])
-                if new_polygons:
-                    new_feature = deepcopy(feature)
-                    new_feature['geometry']['coordinates'] = new_polygons
-                    return new_feature
-                    
-        return None
-
-    def process_geojson(self, input_data):
-        """Process the GeoJSON data"""
-        center_lon = center_lat = None
+    def create_cropping_geometry(self, features):
+        """
+        Create a Shapely geometry to use for cropping. Either a bounding box
+        or a circular buffer.
+        """
         if self.distance:
-            # If using distance, calculate center from features
+            # Calculate center from all features
             all_coords = []
-            for feature in input_data['features']:
-                coords = self.extract_coordinates(feature)
-                all_coords.extend(coords)
-                
+            for feature in features:
+                all_coords.extend(self.extract_coordinates(feature))
             if not all_coords:
                 raise ValueError("No coordinates found in features")
-                
             lons, lats = zip(*all_coords)
             center_lon = statistics.median(lons)
             center_lat = statistics.median(lats)
-            
+            # Convert distance in meters to degrees (approximation)
+            radius_degrees = self.distance / 111320.0
+            cropping_geom = Point(center_lon, center_lat).buffer(radius_degrees)
             if self.debug:
-                print(f"Using center point: {center_lon:.6f}, {center_lat:.6f}")
+                print(
+                    f"Using circular cropping geometry with center: ({center_lon:.6f}, {center_lat:.6f}) and radius (deg): {radius_degrees:.6f}"
+                )
+            return cropping_geom
         elif self.bbox:
+            # bbox provided as [south, west, north, east]
+            south, west, north, east = self.bbox
+            cropping_geom = box(west, south, east, north)
             if self.debug:
-                print(f"Using bounding box: {self.bbox}")
-        
-        # Crop features
+                print(f"Using bounding box cropping geometry: {self.bbox}")
+            return cropping_geom
+        else:
+            return None
+
+    def extract_coordinates(self, feature):
+        """Extract all coordinates from a feature regardless of geometry type"""
+        geometry = feature["geometry"]
+        coords = []
+
+        if geometry["type"] == "Point":
+            coords = [geometry["coordinates"]]
+        elif geometry["type"] == "LineString":
+            coords = geometry["coordinates"]
+        elif geometry["type"] == "Polygon":
+            for ring in geometry["coordinates"]:
+                coords.extend(ring)
+        elif geometry["type"] == "MultiPolygon":
+            for polygon in geometry["coordinates"]:
+                for ring in polygon:
+                    coords.extend(ring)
+        elif geometry["type"] == "MultiLineString":
+            for line in geometry["coordinates"]:
+                coords.extend(line)
+
+        return coords
+
+    def crop_feature(self, feature, cropping_geom):
+        """
+        Crop a feature to the cropping geometry using geometric intersection.
+        Returns a new feature with the clipped geometry, or None if no intersection.
+        """
+        try:
+            geom = shape(feature["geometry"])
+        except Exception as e:
+            if self.debug:
+                print(f"Failed to parse geometry: {e}")
+            return None
+
+        clipped = geom.intersection(cropping_geom)
+        if clipped.is_empty:
+            return None
+
+        # If geometrycollection, pick a valid geometry
+        if clipped.geom_type == "GeometryCollection":
+            valid_geoms = [
+                g
+                for g in clipped
+                if g.geom_type
+                in ["Polygon", "MultiPolygon", "LineString", "MultiLineString"]
+            ]
+            if not valid_geoms:
+                return None
+            # Pick the largest polygon if available; else first valid
+            polygons = [
+                g for g in valid_geoms if g.geom_type in ["Polygon", "MultiPolygon"]
+            ]
+            clipped = (
+                max(polygons, key=lambda g: g.area) if polygons else valid_geoms[0]
+            )
+
+        new_feature = deepcopy(feature)
+        new_feature["geometry"] = mapping(clipped)
+        return new_feature
+
+    def process_geojson(self, input_data):
+        """
+        Process the GeoJSON data by clipping each feature to the defined cropping geometry.
+        """
+        features = input_data.get("features", [])
+        cropping_geom = self.create_cropping_geometry(features)
+        if cropping_geom is None:
+            raise ValueError(
+                "No cropping geometry defined (neither bbox nor distance provided)"
+            )
+
         new_features = []
-        for feature in input_data['features']:
-            cropped = self.crop_feature(feature, center_lon, center_lat)
+        for feature in features:
+            cropped = self.crop_feature(feature, cropping_geom)
             if cropped:
                 new_features.append(cropped)
-                
+
         if self.debug:
-            print(f"Original features: {len(input_data['features'])}")
+            print(f"Original features: {len(features)}")
             print(f"Cropped features: {len(new_features)}")
-            
-        # Create new GeoJSON
-        output_data = {
-            'type': 'FeatureCollection',
-            'features': new_features
-        }
-        
+
+        output_data = {"type": "FeatureCollection", "features": new_features}
         return output_data
 
+
 def main():
-    parser = argparse.ArgumentParser(description='Preprocess GeoJSON for 3D city modeling')
-    parser.add_argument('input_file', help='Input GeoJSON file')
-    parser.add_argument('output_file', help='Output GeoJSON file')
-    parser.add_argument('--distance', type=float,
-                      help='Distance in meters from center to crop')
-    parser.add_argument('--bbox', type=float, nargs=4,
-                      metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
-                      help='Bounding box coordinates (south west north east)')
-    parser.add_argument('--debug', action='store_true',
-                      help='Enable debug output')
-    
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Preprocess GeoJSON for 3D city modeling"
+    )
+    parser.add_argument("input_file", help="Input GeoJSON file")
+    parser.add_argument("output_file", help="Output GeoJSON file")
+    parser.add_argument(
+        "--distance", type=float, help="Distance in meters from center to crop"
+    )
+    parser.add_argument(
+        "--bbox",
+        type=float,
+        nargs=4,
+        metavar=("SOUTH", "WEST", "NORTH", "EAST"),
+        help="Bounding box coordinates (south west north east)",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+
     args = parser.parse_args()
-    
+
     if not args.distance and not args.bbox:
         parser.error("Either --distance or --bbox must be specified")
-    
+
     try:
-        # Read input file
-        with open(args.input_file, 'r') as f:
+        with open(args.input_file, "r") as f:
             input_data = json.load(f)
-            
-        # Process data
+
         processor = GeoJSONPreprocessor(
             bbox=args.bbox if args.bbox else None,
-            distance_meters=args.distance if args.distance else None
+            distance_meters=args.distance if args.distance else None,
         )
         processor.debug = args.debug
         output_data = processor.process_geojson(input_data)
-        
-        # Write output file
-        with open(args.output_file, 'w') as f:
+
+        with open(args.output_file, "w") as f:
             json.dump(output_data, f, indent=2)
-            
+
         print(f"Successfully processed GeoJSON data and saved to {args.output_file}")
-        
+
     except Exception as e:
         print(f"Error: {str(e)}")
         raise
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
+
 ```
 
 # lib/preview.py
@@ -848,12 +1119,12 @@ class OpenSCADIntegration:
         # Export quality settings
         self.export_quality = {
             "fn": 256,  # High-quality circles
-            "fa": 2,  # Minimum angle (degrees)
-            "fs": 0.2,  # Minimum size (mm)
+            "fa": 2,  # Minimum angle
+            "fs": 0.2,  # Minimum size
         }
 
     def _find_openscad(self):
-        """Find the OpenSCAD executable based on the current platform."""
+        """Find the OpenSCAD executable."""
         if sys.platform == "win32":
             possible_paths = [
                 r"C:\Program Files\OpenSCAD\openscad.exe",
@@ -888,17 +1159,15 @@ class OpenSCADIntegration:
         frame_scad_file = os.path.abspath(frame_scad_file)
         output_image = os.path.abspath(output_image)
 
-        # Check if files exist
         if not os.path.exists(main_scad_file):
             raise FileNotFoundError(f"Main SCAD file not found: {main_scad_file}")
         if not os.path.exists(frame_scad_file):
             raise FileNotFoundError(f"Frame SCAD file not found: {frame_scad_file}")
 
-        # Set environment variable explicitly
         env = os.environ.copy()
         env["OPENSCAD_HEADLESS"] = "1"
 
-        # Generate preview for main model
+        # Preview for main model
         main_preview = output_image.replace(".png", "_main.png")
         command_main = [
             self.openscad_path,
@@ -913,7 +1182,7 @@ class OpenSCADIntegration:
             main_scad_file,
         ]
 
-        # Generate preview for frame
+        # Preview for frame
         frame_preview = output_image.replace(".png", "_frame.png")
         command_frame = [
             self.openscad_path,
@@ -932,23 +1201,13 @@ class OpenSCADIntegration:
 
         try:
             print("\nGenerating preview for main model...")
-            result_main = subprocess.run(
-                command_main,
-                env=env,
-                cwd=os.path.dirname(main_scad_file),
-                capture_output=True,
-                text=True,
-                check=True,
+            subprocess.run(
+                command_main, env=env, capture_output=True, text=True, check=True
             )
 
             print("Generating preview for frame...")
-            result_frame = subprocess.run(
-                command_frame,
-                env=env,
-                cwd=os.path.dirname(frame_scad_file),
-                capture_output=True,
-                text=True,
-                check=True,
+            subprocess.run(
+                command_frame, env=env, capture_output=True, text=True, check=True
             )
 
             print(f"Preview images generated:")
@@ -965,36 +1224,26 @@ class OpenSCADIntegration:
     def generate_stl(self, scad_file, output_stl, repair=True):
         """
         Generate high-quality STL files for both main model and frame.
-
-        Args:
-            scad_file (str): Path to input SCAD file
-            output_stl (str): Path for output STL file
-            repair (bool): Not used, kept for backwards compatibility
         """
         try:
-            # Get paths for main and frame files
             main_scad_file = scad_file.replace(".scad", "_main.scad")
             frame_scad_file = scad_file.replace(".scad", "_frame.scad")
             main_scad_file = os.path.abspath(main_scad_file)
             frame_scad_file = os.path.abspath(frame_scad_file)
 
-            # Generate output STL paths
             main_stl = output_stl.replace(".stl", "_main.stl")
             frame_stl = output_stl.replace(".stl", "_frame.stl")
             main_stl = os.path.abspath(main_stl)
             frame_stl = os.path.abspath(frame_stl)
 
-            # Check if input files exist
             if not os.path.exists(main_scad_file):
                 raise FileNotFoundError(f"Main SCAD file not found: {main_scad_file}")
             if not os.path.exists(frame_scad_file):
                 raise FileNotFoundError(f"Frame SCAD file not found: {frame_scad_file}")
 
-            # Set environment variables for headless operation
             env = os.environ.copy()
             env["OPENSCAD_HEADLESS"] = "1"
 
-            # Prepare high-quality export commands
             command_main = [
                 self.openscad_path,
                 "--backend=Manifold",
@@ -1031,29 +1280,16 @@ class OpenSCADIntegration:
             print(f"  $fa: {self.export_quality['fa']}")
             print(f"  $fs: {self.export_quality['fs']}")
 
-            # Generate main model STL
             print("\nGenerating main model STL...")
-            result_main = subprocess.run(
-                command_main,
-                env=env,
-                cwd=os.path.dirname(main_scad_file),
-                capture_output=True,
-                text=True,
-                check=True,
+            subprocess.run(
+                command_main, env=env, capture_output=True, text=True, check=True
             )
 
-            # Generate frame STL
             print("Generating frame STL...")
-            result_frame = subprocess.run(
-                command_frame,
-                env=env,
-                cwd=os.path.dirname(frame_scad_file),
-                capture_output=True,
-                text=True,
-                check=True,
+            subprocess.run(
+                command_frame, env=env, capture_output=True, text=True, check=True
             )
 
-            # Verify the exports
             if not os.path.exists(main_stl):
                 raise RuntimeError(f"Main STL file was not created: {main_stl}")
             if not os.path.exists(frame_stl):
@@ -1081,14 +1317,13 @@ class OpenSCADIntegration:
         if not self.openscad_path:
             raise RuntimeError("OpenSCAD not found")
 
-        # First, open the file in OpenSCAD
         subprocess.Popen([self.openscad_path, scad_file])
 
         class SCDHandler(FileSystemEventHandler):
             def __init__(self, scad_path):
                 self.scad_path = scad_path
                 self.last_reload = 0
-                self.reload_cooldown = 1.0  # seconds
+                self.reload_cooldown = 1.0
 
             def on_modified(self, event):
                 if event.src_path == self.scad_path:
@@ -1177,23 +1412,28 @@ class ScadGenerator:
         self.geometry = GeometryUtils()
 
     def generate_openscad(self, features, size, layer_specs):
-        """Generate complete OpenSCAD code for main model without frame"""
+        """
+        Generate complete OpenSCAD code for main model (excluding frame).
+        We 'union' buildings & bridges, then 'difference' roads/water/rail.
+        """
         scad = [
             f"""// Generated with Enhanced City Converter
 // Style: {self.style_manager.style['artistic_style']}
 // Detail Level: {self.style_manager.style['detail_level']}
 
-// Main city model without frame
-difference() {{  // Main difference that affects everything
+difference() {{
     union() {{
-        // Base
+        // Base block
         cube([{size}, {size}, {layer_specs['base']['height']}]);
-        
-        // Add buildings on top of base
+
+        // Buildings
         {self._generate_building_features(features['buildings'], layer_specs)}
+
+        // Bridges (NEW)
+        {self._generate_bridge_features(features['bridges'], layer_specs)}
     }}
-    
-    // Subtractive features (water, roads, railways)
+
+    // Subtractive features
     union() {{
         {self._generate_water_features(features['water'], layer_specs)}
         {self._generate_road_features(features['roads'], layer_specs)}
@@ -1201,11 +1441,10 @@ difference() {{  // Main difference that affects everything
     }}
 }}"""
         ]
-
         return "\n".join(scad)
 
     def _generate_water_features(self, water_features, layer_specs):
-        """Generate OpenSCAD code for water features"""
+        """Generate OpenSCAD code for water features (subtractive)"""
         scad = []
         base_height = layer_specs["base"]["height"]
         water_depth = layer_specs["water"]["depth"]
@@ -1214,86 +1453,110 @@ difference() {{  // Main difference that affects everything
             coords = water.get("coords", water)
             points_str = self.geometry.generate_polygon_points(coords)
             if points_str:
-                scad.extend(
-                    [
-                        f"""
+                scad.append(
+                    f"""
         // Water body {i+1}
         translate([0, 0, {base_height - water_depth}])
             linear_extrude(height={water_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);"""
-                    ]
+                polygon([{points_str}]);
+        """
                 )
 
         return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for road features"""
+        """Generate OpenSCAD code for roads (subtractive)"""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
         road_width = layer_specs["roads"]["width"]
 
+        # Debug prints
         print(f"\nGenerating road features:")
         print(f"Number of roads: {len(road_features)}")
-        print(f"Road depth: {road_depth}mm")
-        print(f"Road width: {road_width}mm")
+        print(f"Road depth: {road_depth}mm, width: {road_width}mm")
 
         for i, road in enumerate(road_features):
-            if isinstance(road, dict):
-                coords = road.get("coords", [])
-                is_parking = road.get("is_parking", False)
+            coords = road.get("coords", [])
+            is_parking = road.get("is_parking", False)
+            if is_parking and len(coords) >= 3:
+                # Polygon
+                points_str = self.geometry.generate_polygon_points(coords)
+            else:
+                # Line-based (buffered polygon)
                 points_str = None
-
-                if is_parking and len(coords) >= 3:
-                    points_str = self.geometry.generate_polygon_points(coords)
-                elif len(coords) >= 2:
+                if len(coords) >= 2:
                     points_str = self.geometry.generate_buffered_polygon(
                         coords, road_width
                     )
-            else:
-                points_str = self.geometry.generate_buffered_polygon(road, road_width)
 
             if points_str:
-                scad.extend(
-                    [
-                        f"""
+                scad.append(
+                    f"""
         // Road {i+1}
         translate([0, 0, {base_height - road_depth}])
             linear_extrude(height={road_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);"""
-                    ]
+                polygon([{points_str}]);
+        """
                 )
 
         return "\n".join(scad)
 
     def _generate_railway_features(self, railway_features, layer_specs):
-        """Generate OpenSCAD code for railway features"""
+        """Generate OpenSCAD code for railways (subtractive)"""
         scad = []
         base_height = layer_specs["base"]["height"]
         railway_depth = layer_specs["railways"]["depth"]
         railway_width = layer_specs["railways"]["width"]
 
         for i, railway in enumerate(railway_features):
-            coords = railway.get("coords", []) if isinstance(railway, dict) else railway
-            if len(coords) >= 2:
-                points_str = self.geometry.generate_buffered_polygon(
-                    coords, railway_width
-                )
-                if points_str:
-                    scad.extend(
-                        [
-                            f"""
+            coords = railway.get("coords", [])
+            if len(coords) < 2:
+                continue
+            points_str = self.geometry.generate_buffered_polygon(coords, railway_width)
+            if points_str:
+                scad.append(
+                    f"""
         // Railway {i+1}
         translate([0, 0, {base_height - railway_depth}])
             linear_extrude(height={railway_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);"""
-                        ]
-                    )
+                polygon([{points_str}]);
+        """
+                )
+
+        return "\n".join(scad)
+
+    def _generate_bridge_features(self, bridge_features, layer_specs):
+        """
+        Generate OpenSCAD code for bridges as
+        1 mm above the base, 1 mm thick, with road-like width.
+        """
+        scad = []
+        base_height = layer_specs["base"]["height"]
+        bridge_thickness = 1.0  # thickness
+        z_offset = base_height + 1.0  # place 1 mm above the top of the base
+        bridge_width = layer_specs["roads"]["width"]  # or define a custom width
+
+        for i, bridge in enumerate(bridge_features):
+            coords = bridge.get("coords", [])
+            if len(coords) < 2:
+                continue
+            points_str = self.geometry.generate_buffered_polygon(coords, bridge_width)
+            if points_str:
+                scad.append(
+                    f"""
+        // Bridge {i+1}
+        // Placed 1mm above base, 1mm thick
+        translate([0, 0, {z_offset}])
+            linear_extrude(height={bridge_thickness}, convexity=2)
+                polygon([{points_str}]);
+        """
+                )
 
         return "\n".join(scad)
 
     def _generate_building_features(self, building_features, layer_specs):
-        """Generate OpenSCAD code for building features"""
+        """Generate OpenSCAD code for building features (unioned on top)"""
         scad = []
         base_height = layer_specs["base"]["height"]
 
@@ -1302,59 +1565,57 @@ difference() {{  // Main difference that affects everything
             if not points_str:
                 continue
 
-            is_cluster = building.get("is_cluster", False)
             building_height = building["height"]
+            is_cluster = building.get("is_cluster", False)
 
-            # Generate building with appropriate style
             details = self._generate_building_details(
                 points_str, building_height, is_cluster
             )
 
-            scad.extend(
-                [
-                    f"""
+            scad.append(
+                f"""
     // {"Building Cluster" if is_cluster else "Building"} {i+1}
     translate([0, 0, {base_height}]) {{
         {details}
     }}"""
-                ]
             )
 
         return "\n".join(scad)
 
     def _generate_building_details(self, points_str, height, is_cluster):
         """Generate architectural details based on style"""
-        if not is_cluster or self.style_manager.style["detail_level"] < 0.5:
-            return f"""
-                linear_extrude(height={height}, convexity=2)
-                    polygon([{points_str}]);"""
+        style = self.style_manager.style["artistic_style"]
+        detail_level = self.style_manager.style["detail_level"]
 
-        if self.style_manager.style["artistic_style"] == "modern":
-            return f"""
-                union() {{
-                    linear_extrude(height={height}, convexity=2)
-                        polygon([{points_str}]);
-                    translate([0, 0, {height}])
-                        linear_extrude(height=0.8, convexity=2)
-                            offset(r=-0.8)
-                                polygon([{points_str}]);
-                }}"""
+        # If it's a single building or minimal detail, extrude as-is
+        if not is_cluster or detail_level < 0.5:
+            return f"""linear_extrude(height={height}, convexity=2)
+    polygon([{points_str}]);"""
 
-        elif self.style_manager.style["artistic_style"] == "classic":
+        # Otherwise, add stylized top or sections
+        if style == "modern":
             return f"""
-                union() {{
-                    linear_extrude(height={height}, convexity=2)
-                        polygon([{points_str}]);
-                    translate([0, 0, {height * 0.8}])
-                        linear_extrude(height={height * 0.2}, convexity=2)
-                            offset(r=-0.5)
-                                polygon([{points_str}]);
-                }}"""
-
+    union() {{
+        linear_extrude(height={height}, convexity=2)
+            polygon([{points_str}]);
+        translate([0, 0, {height}])
+            linear_extrude(height=0.8, convexity=2)
+                offset(r=-0.8)
+                    polygon([{points_str}]);
+    }}"""
+        elif style == "classic":
+            return f"""
+    union() {{
+        linear_extrude(height={height}, convexity=2)
+            polygon([{points_str}]);
+        translate([0, 0, {height * 0.8}])
+            linear_extrude(height={height * 0.2}, convexity=2)
+                offset(r=-0.5)
+                    polygon([{points_str}]);
+    }}"""
         else:  # minimal
-            return f"""
-                linear_extrude(height={height}, convexity=2)
-                    polygon([{points_str}]);"""
+            return f"""linear_extrude(height={height}, convexity=2)
+    polygon([{points_str}]);"""
 
 ```
 
@@ -1363,12 +1624,16 @@ difference() {{  // Main difference that affects everything
 ```py
 # lib/style_manager.py
 from math import log10, sin, cos, pi, atan2
+from shapely.geometry import LineString
 from .geometry import GeometryUtils
+from .block_combiner import BlockCombiner
 
 
 class StyleManager:
     def __init__(self, style_settings=None):
         self.geometry = GeometryUtils()
+        self.block_combiner = BlockCombiner(self)
+        self.current_features = {}
 
         # Default style settings
         self.style = {
@@ -1385,13 +1650,13 @@ class StyleManager:
             self.style.update(style_settings)
 
     def get_default_layer_specs(self):
-        """Get default layer specifications without border insets"""
+        """Get default layer specifications for roads, water, buildings, etc."""
         return {
             "water": {
                 "depth": 3,
             },
             "roads": {
-                "depth": 0.6,
+                "depth": 1.6,
                 "width": 2.0,
             },
             "railways": {
@@ -1400,13 +1665,16 @@ class StyleManager:
             },
             "buildings": {"min_height": 2, "max_height": 6},
             "base": {
-                "height": 10,  # Base height of 10mm
+                "height": 10,
             },
         }
 
     def scale_building_height(self, properties):
-        """Scale building height using log scaling"""
-        default_height = 5
+        """
+        Given a building's OSM properties, produce a scaled building height (in mm).
+        Uses a simple log scaling approach to map real-world height to a small range.
+        """
+        default_height = 5.0
 
         height_m = None
         if "height" in properties:
@@ -1417,157 +1685,165 @@ class StyleManager:
         elif "building:levels" in properties:
             try:
                 levels = float(properties["building:levels"])
-                height_m = levels * 3
+                height_m = levels * 3  # assume 3m per level
             except ValueError:
                 pass
 
-        height_m = height_m if height_m is not None else default_height
+        if height_m is None:
+            height_m = default_height
 
-        min_height = self.get_default_layer_specs()["buildings"]["min_height"]
-        max_height = self.get_default_layer_specs()["buildings"]["max_height"]
+        layer_specs = self.get_default_layer_specs()
+        min_height = layer_specs["buildings"]["min_height"]
+        max_height = layer_specs["buildings"]["max_height"]
 
-        log_height = log10(height_m + 1)
-        log_min = log10(1)
-        log_max = log10(101)
-
-        scaled_height = (log_height - log_min) / (log_max - log_min)
-        final_height = min_height + scaled_height * (max_height - min_height)
-
+        # Log scaling from 1..100 meters -> min_height..max_height in mm
+        log_min = log10(1.0)
+        log_max = log10(101.0)
+        log_height = log10(height_m + 1.0)  # +1 to avoid log(0)
+        scaled = (log_height - log_min) / (log_max - log_min)
+        final_height = min_height + scaled * (max_height - min_height)
         return round(final_height, 2)
 
-    def merge_nearby_buildings(self, buildings):
-        """Merge buildings that are close to each other into clusters"""
-        # If merge_distance is 0, skip merging entirely
-        if self.style["merge_distance"] <= 0:
+    def merge_nearby_buildings(self, buildings, barrier_union=None):
+        """Choose merging strategy based on style."""
+        if self.style["artistic_style"] == "block-combine":
+            return self.block_combiner.combine_buildings_by_block(self.current_features)
+        else:
+            return self._merge_buildings_by_distance(buildings, barrier_union)
+
+    def _merge_buildings_by_distance(self, buildings, barrier_union=None):
+        """Original distance-based merging logic"""
+        merge_dist = self.style["merge_distance"]
+        if merge_dist <= 0:
             return buildings
 
-        clusters = []
-        processed = set()
+        indexed_buildings = []
+        for idx, bldg in enumerate(buildings):
+            ctd = self.geometry.calculate_centroid(bldg["coords"])
+            indexed_buildings.append((idx, ctd, bldg))
 
-        for i, building in enumerate(buildings):
-            if i in processed:
+        visited = set()
+        clusters = []
+
+        for i, centroidA, bldgA in indexed_buildings:
+            if i in visited:
                 continue
 
-            cluster = [building]
-            processed.add(i)
+            stack = [i]
+            cluster_bldgs = []
+            visited.add(i)
 
-            # Find nearby buildings
-            center = self.geometry.calculate_centroid(building["coords"])
+            while stack:
+                current_idx = stack.pop()
+                _, current_centroid, current_bldg = indexed_buildings[current_idx]
+                cluster_bldgs.append(current_bldg)
 
-            for j, other in enumerate(buildings):
-                if j in processed:
-                    continue
+                for j, centroidB, bldgB in indexed_buildings:
+                    if j in visited:
+                        continue
+                    dist = self.geometry.calculate_distance(current_centroid, centroidB)
+                    if dist < merge_dist:
+                        if not self._is_blocked_by_barrier(
+                            current_centroid, centroidB, barrier_union
+                        ):
+                            visited.add(j)
+                            stack.append(j)
 
-                other_center = self.geometry.calculate_centroid(other["coords"])
-                distance = self.geometry.calculate_distance(center, other_center)
-
-                if distance < self.style["merge_distance"]:
-                    cluster.append(other)
-                    processed.add(j)
-
-            clusters.append(self._merge_building_cluster(cluster))
+            merged = self._merge_building_cluster(cluster_bldgs)
+            clusters.append(merged)
 
         return clusters
 
+    def _is_blocked_by_barrier(self, ptA, ptB, barrier_union):
+        """Return True if the line from ptA to ptB intersects the barrier_union"""
+        if barrier_union is None:
+            return False
+        line = LineString([ptA, ptB])
+        return line.intersects(barrier_union)
+
     def _merge_building_cluster(self, cluster):
-        """Merge a cluster of buildings into a single artistic structure"""
+        """Merge building polygons in 'cluster' into one shape"""
         if len(cluster) == 1:
             return cluster[0]
 
-        # Calculate weighted height for the cluster
-        total_area = 0
-        weighted_height = 0
-        for building in cluster:
-            area = self.geometry.calculate_polygon_area(building["coords"])
+        total_area = 0.0
+        weighted_height = 0.0
+        all_coords = []
+
+        for b in cluster:
+            coords = b["coords"]
+            area = self.geometry.calculate_polygon_area(coords)
             total_area += area
-            weighted_height += building["height"] * area
+            weighted_height += b["height"] * area
+            all_coords.extend(coords)
 
         avg_height = (
             weighted_height / total_area if total_area > 0 else cluster[0]["height"]
         )
-
-        # Combine polygons with artistic variation
-        combined_coords = []
-        for building in cluster:
-            coords = building["coords"]
-            varied_coords = self._add_artistic_variation(coords)
-            combined_coords.extend(varied_coords)
-
-        # Create hull around combined coordinates
-        hull = self._create_artistic_hull(combined_coords)
+        hull_coords = self._create_artistic_hull(all_coords)
 
         return {
-            "coords": hull,
+            "coords": hull_coords,
             "height": avg_height,
             "is_cluster": True,
             "size": len(cluster),
         }
 
     def _add_artistic_variation(self, coords):
-        """Add variations to building coords based on style"""
+        """Add small coordinate perturbations for artistic effect"""
         varied = []
         variance = self.style["height_variance"]
+        style = self.style["artistic_style"]
 
-        if self.style["artistic_style"] == "modern":
-            # Add angular variations
-            from math import sin, pi
-
-            for i, coord in enumerate(coords):
-                x, y = coord
+        if style == "modern":
+            for i, (x, y) in enumerate(coords):
                 offset = variance * sin(i * pi / len(coords))
                 varied.append([x + offset, y + offset])
-
-        elif self.style["artistic_style"] == "classic":
-            # Add curved variations
-            from math import sin, cos, pi
-
-            for i, coord in enumerate(coords):
-                x, y = coord
-                angle = 2 * pi * i / len(coords)
+        elif style == "classic":
+            for i, (x, y) in enumerate(coords):
+                angle = 2.0 * pi * i / len(coords)
                 offset_x = variance * cos(angle)
                 offset_y = variance * sin(angle)
                 varied.append([x + offset_x, y + offset_y])
-
-        else:  # minimal
+        else:  # minimal or block-combine
             varied = coords
 
         return varied
 
     def _create_artistic_hull(self, points):
-        """Create an artistic hull around points based on style settings"""
+        """Sort points by angle around centroid and optionally add detail"""
         if len(points) < 3:
             return points
-
-        from math import atan2, pi, sin
 
         center = self.geometry.calculate_centroid(points)
         sorted_points = sorted(
             points, key=lambda p: atan2(p[1] - center[1], p[0] - center[0])
         )
-
         hull = []
         detail_level = self.style["detail_level"]
 
         for i in range(len(sorted_points)):
             p1 = sorted_points[i]
             p2 = sorted_points[(i + 1) % len(sorted_points)]
-
             hull.append(p1)
 
             if detail_level > 0.5:
-                # Add intermediate points for visual interest
                 dist = self.geometry.calculate_distance(p1, p2)
                 if dist > self.style["cluster_size"]:
-                    # Number of intermediate points based on detail level
                     num_points = int(detail_level * dist / self.style["cluster_size"])
                     for j in range(num_points):
                         t = (j + 1) / (num_points + 1)
-                        mid_x = p1[0] + t * (p2[0] - p1[0])
-                        mid_y = p1[1] + t * (p2[1] - p1[1])
+                        mx = p1[0] + t * (p2[0] - p1[0])
+                        my = p1[1] + t * (p2[1] - p1[1])
                         offset = self.style["height_variance"] * sin(t * pi)
-                        hull.append([mid_x + offset, mid_y - offset])
+                        hull.append([mx + offset, my - offset])
 
+        hull = self._add_artistic_variation(hull)
         return hull
+
+    def set_current_features(self, features):
+        """Store current features for block-combine style to use"""
+        self.current_features = features
 
 ```
 

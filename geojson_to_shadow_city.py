@@ -5,108 +5,166 @@ from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
 from lib.preview import OpenSCADIntegration
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert GeoJSON to artistic 3D city model'
+        description="Convert GeoJSON to artistic 3D city model"
     )
     # Basic arguments
-    parser.add_argument('input_json', help='Input GeoJSON file')
-    parser.add_argument('output_scad', help='Output OpenSCAD file')
-    parser.add_argument('--size', type=float, default=200,
-                        help='Size in mm (default: 200)')
-    parser.add_argument('--height', type=float, default=20,
-                        help='Maximum height in mm (default: 20)')
-    parser.add_argument('--style', choices=['modern', 'classic', 'minimal'],
-                        default='modern', help='Artistic style')
-    parser.add_argument('--detail', type=float, default=1.0,
-                        help='Detail level 0-2 (default: 1.0)')
-    parser.add_argument('--merge-distance', type=float, default=2.0,
-                        help='Distance threshold for merging buildings (default: 2.0)')
-    parser.add_argument('--cluster-size', type=float, default=3.0,
-                        help='Size threshold for building clusters (default: 3.0)')
-    parser.add_argument('--height-variance', type=float, default=0.2,
-                        help='Height variation 0-1 (default: 0.2)')
-    parser.add_argument('--road-width', type=float, default=2.0,
-                        help='Width of roads in mm (default: 2.0)')
-    parser.add_argument('--water-depth', type=float, default=1.4,
-                        help='Depth of water features in mm (default: 1.4)')
-    parser.add_argument('--min-building-area', type=float, default=600.0,
-                        help='Minimum building footprint area in m^2 (default: 600)')
-    parser.add_argument('--debug', action='store_true',
-                        help='Enable debug output')
+    parser.add_argument("input_json", help="Input GeoJSON file")
+    parser.add_argument("output_scad", help="Output OpenSCAD file")
+    parser.add_argument(
+        "--size", type=float, default=200, help="Size in mm (default: 200)"
+    )
+    parser.add_argument(
+        "--height", type=float, default=20, help="Maximum height in mm (default: 20)"
+    )
+    parser.add_argument(
+        "--style",
+        choices=["modern", "classic", "minimal", "block-combine"],
+        default="modern",
+        help="Artistic style",
+    )
+    parser.add_argument(
+        "--detail", type=float, default=1.0, help="Detail level 0-2 (default: 1.0)"
+    )
+    parser.add_argument(
+        "--merge-distance",
+        type=float,
+        default=2.0,
+        help="Distance threshold for merging buildings (default: 2.0)",
+    )
+    parser.add_argument(
+        "--cluster-size",
+        type=float,
+        default=3.0,
+        help="Size threshold for building clusters (default: 3.0)",
+    )
+    parser.add_argument(
+        "--height-variance",
+        type=float,
+        default=0.2,
+        help="Height variation 0-1 (default: 0.2)",
+    )
+    parser.add_argument(
+        "--road-width",
+        type=float,
+        default=2.0,
+        help="Width of roads in mm (default: 2.0)",
+    )
+    parser.add_argument(
+        "--water-depth",
+        type=float,
+        default=1.4,
+        help="Depth of water features in mm (default: 1.4)",
+    )
+    parser.add_argument(
+        "--min-building-area",
+        type=float,
+        default=600.0,
+        help="Minimum building footprint area in m^2 (default: 600)",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
     # Preprocessing arguments
-    preprocess_group = parser.add_argument_group('Preprocessing options')
-    preprocess_group.add_argument('--preprocess', action='store_true',
-                               help='Enable GeoJSON preprocessing')
-    preprocess_group.add_argument('--crop-distance', type=float,
-                               help='Distance in meters from center to crop features')
-    preprocess_group.add_argument('--crop-bbox', type=float, nargs=4,
-                               metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
-                               help='Bounding box coordinates for cropping')
+    preprocess_group = parser.add_argument_group("Preprocessing options")
+    preprocess_group.add_argument(
+        "--preprocess", action="store_true", help="Enable GeoJSON preprocessing"
+    )
+    preprocess_group.add_argument(
+        "--crop-distance",
+        type=float,
+        help="Distance in meters from center to crop features",
+    )
+    preprocess_group.add_argument(
+        "--crop-bbox",
+        type=float,
+        nargs=4,
+        metavar=("SOUTH", "WEST", "NORTH", "EAST"),
+        help="Bounding box coordinates for cropping",
+    )
 
     # Export format group
-    export_group = parser.add_argument_group('Export Options')
-    export_group.add_argument('--export', choices=['preview', 'stl', 'both'],
-                          help='Export format (preview image, STL, or both)')
-    export_group.add_argument('--output-stl',
-                          help='Output STL filename (default: based on SCAD filename)')
-    export_group.add_argument('--no-repair', action='store_true',
-                          help='Disable automatic geometry repair attempts')
-    export_group.add_argument('--force', action='store_true',
-                          help='Force STL generation even if validation fails')
-    
+    export_group = parser.add_argument_group("Export Options")
+    export_group.add_argument(
+        "--export",
+        choices=["preview", "stl", "both"],
+        help="Export format (preview image, STL, or both)",
+    )
+    export_group.add_argument(
+        "--output-stl", help="Output STL filename (default: based on SCAD filename)"
+    )
+    export_group.add_argument(
+        "--no-repair",
+        action="store_true",
+        help="Disable automatic geometry repair attempts",
+    )
+    export_group.add_argument(
+        "--force",
+        action="store_true",
+        help="Force STL generation even if validation fails",
+    )
+
     # Preview options
-    preview_group = parser.add_argument_group('Preview and Integration')
-    preview_group.add_argument('--preview-size', type=int, nargs=2, 
-                            metavar=('WIDTH', 'HEIGHT'),
-                            default=[1920, 1080],
-                            help='Preview image size in pixels')
-    preview_group.add_argument('--preview-file',
-                            help='Preview image filename (default: based on SCAD filename)')
-    preview_group.add_argument('--watch', action='store_true',
-                            help='Watch SCAD file and auto-reload in OpenSCAD')
-    preview_group.add_argument('--openscad-path',
-                            help='Path to OpenSCAD executable')
+    preview_group = parser.add_argument_group("Preview and Integration")
+    preview_group.add_argument(
+        "--preview-size",
+        type=int,
+        nargs=2,
+        metavar=("WIDTH", "HEIGHT"),
+        default=[1920, 1080],
+        help="Preview image size in pixels",
+    )
+    preview_group.add_argument(
+        "--preview-file",
+        help="Preview image filename (default: based on SCAD filename)",
+    )
+    preview_group.add_argument(
+        "--watch",
+        action="store_true",
+        help="Watch SCAD file and auto-reload in OpenSCAD",
+    )
+    preview_group.add_argument("--openscad-path", help="Path to OpenSCAD executable")
 
     args = parser.parse_args()
 
     try:
         # Initialize style settings
         style_settings = {
-            'artistic_style': args.style,
-            'detail_level': args.detail,
-            'merge_distance': args.merge_distance,
-            'cluster_size': args.cluster_size,
-            'height_variance': args.height_variance,
-            'min_building_area': args.min_building_area
+            "artistic_style": args.style,
+            "detail_level": args.detail,
+            "merge_distance": args.merge_distance,
+            "cluster_size": args.cluster_size,
+            "height_variance": args.height_variance,
+            "min_building_area": args.min_building_area,
         }
 
         # Create converter instance
         converter = EnhancedCityConverter(
-            size_mm=args.size,
-            max_height_mm=args.height,
-            style_settings=style_settings
+            size_mm=args.size, max_height_mm=args.height, style_settings=style_settings
         )
 
         # Update feature specifications
-        converter.layer_specs['roads']['width'] = args.road_width
-        converter.layer_specs['water']['depth'] = args.water_depth
+        converter.layer_specs["roads"]["width"] = args.road_width
+        converter.layer_specs["water"]["depth"] = args.water_depth
         converter.debug = args.debug
 
         # Preprocess if requested
         if args.preprocess:
             if not (args.crop_distance or args.crop_bbox):
-                parser.error("When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified")
-            
+                parser.error(
+                    "When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified"
+                )
+
             preprocessor = GeoJSONPreprocessor(
-                bbox=args.crop_bbox,
-                distance_meters=args.crop_distance
+                bbox=args.crop_bbox, distance_meters=args.crop_distance
             )
             preprocessor.debug = args.debug
-            
+
             # Process and pass the data directly to converter
-            converter.convert_preprocessed(args.input_json, args.output_scad, preprocessor)
+            converter.convert_preprocessed(
+                args.input_json, args.output_scad, preprocessor
+            )
         else:
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
@@ -114,35 +172,31 @@ def main():
         # Handle exports if requested
         if args.export or args.watch:
             integration = OpenSCADIntegration(args.openscad_path)
-            
-            # Determine output filenames
-            stl_file = args.output_stl or args.output_scad.replace('.scad', '.stl')
-            preview_file = args.preview_file or args.output_scad.replace('.scad', '_preview.png')
 
-            if args.export in ['preview', 'both']:
+            # Determine output filenames
+            stl_file = args.output_stl or args.output_scad.replace(".scad", ".stl")
+            preview_file = args.preview_file or args.output_scad.replace(
+                ".scad", "_preview.png"
+            )
+
+            if args.export in ["preview", "both"]:
                 print("\nGenerating preview image...")
                 integration.generate_preview(
-                    args.output_scad,
-                    preview_file,
-                    size=args.preview_size
+                    args.output_scad, preview_file, size=args.preview_size
                 )
 
-            if args.export in ['stl', 'both']:
+            if args.export in ["stl", "both"]:
                 print("\nGenerating STL file...")
                 try:
                     integration.generate_stl(
-                        args.output_scad,
-                        stl_file,
-                        repair=not args.no_repair
+                        args.output_scad, stl_file, repair=not args.no_repair
                     )
                 except Exception as e:
                     if args.force:
                         print(f"Warning: {str(e)}")
                         print("Forcing STL generation due to --force flag...")
                         integration.generate_stl(
-                            args.output_scad,
-                            stl_file,
-                            repair=False
+                            args.output_scad, stl_file, repair=False
                         )
                     else:
                         raise
@@ -162,5 +216,6 @@ def main():
         print(f"Error: {str(e)}")
         raise
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

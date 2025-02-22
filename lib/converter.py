@@ -4,6 +4,7 @@ from .feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
 from .style_manager import StyleManager
 
+
 class EnhancedCityConverter:
     def __init__(self, size_mm=200, max_height_mm=20, style_settings=None):
         self.size = size_mm
@@ -13,7 +14,7 @@ class EnhancedCityConverter:
         self.scad_generator = ScadGenerator(self.style_manager)
         self.debug = True
         self.debug_log = []
-        
+
         # Initialize layer specifications
         self.layer_specs = self.style_manager.get_default_layer_specs()
 
@@ -30,48 +31,46 @@ class EnhancedCityConverter:
             # Read input file
             with open(input_file) as f:
                 data = json.load(f)
-            
-            # Process features
+
+            # Process features - this will now handle setting features in style_manager
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
-            
+
             # Generate main model SCAD code
             self.print_debug("\nGenerating main model OpenSCAD code...")
             main_scad = self.scad_generator.generate_openscad(
-                features, 
-                self.size, 
-                self.layer_specs
+                features, self.size, self.layer_specs
             )
-            
+
             # Generate frame SCAD code
             self.print_debug("\nGenerating frame OpenSCAD code...")
             frame_scad = self._generate_frame(self.size, self.max_height)
-            
+
             # Determine output filenames
-            main_file = output_file.replace('.scad', '_main.scad')
-            frame_file = output_file.replace('.scad', '_frame.scad')
-            
+            main_file = output_file.replace(".scad", "_main.scad")
+            frame_file = output_file.replace(".scad", "_frame.scad")
+
             # Write main model
-            with open(main_file, 'w') as f:
+            with open(main_file, "w") as f:
                 f.write(main_scad)
-            
+
             # Write frame
-            with open(frame_file, 'w') as f:
+            with open(frame_file, "w") as f:
                 f.write(frame_scad)
-            
+
             self.print_debug(f"\nSuccessfully created main model: {main_file}")
             self.print_debug(f"Successfully created frame: {frame_file}")
             self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
-            
+
             # Write debug log if needed
             if self.debug:
-                log_file = output_file + '.log'
-                with open(log_file, 'w') as f:
-                    f.write('\n'.join(self.debug_log))
+                log_file = output_file + ".log"
+                with open(log_file, "w") as f:
+                    f.write("\n".join(self.debug_log))
                 self.print_debug(f"\nDebug log written to {log_file}")
-            
+
         except Exception as e:
             print(f"Error: {str(e)}")
             raise
@@ -82,52 +81,52 @@ class EnhancedCityConverter:
             # Read input file
             with open(input_file) as f:
                 data = json.load(f)
-            
+
             # Preprocess the data
             self.print_debug("\nPreprocessing GeoJSON data...")
             processed_data = preprocessor.process_geojson(data)
-            
-            # Process features
+
+            # Process features - this will now handle setting features in style_manager
             self.print_debug("\nProcessing features...")
-            features = self.feature_processor.process_features(processed_data, self.size)
-            
+            features = self.feature_processor.process_features(
+                processed_data, self.size
+            )
+
             # Generate main model SCAD code
             self.print_debug("\nGenerating main model OpenSCAD code...")
             main_scad = self.scad_generator.generate_openscad(
-                features, 
-                self.size, 
-                self.layer_specs
+                features, self.size, self.layer_specs
             )
-            
+
             # Generate frame SCAD code
             self.print_debug("\nGenerating frame OpenSCAD code...")
             frame_scad = self._generate_frame(self.size, self.max_height)
-            
+
             # Determine output filenames
-            main_file = output_file.replace('.scad', '_main.scad')
-            frame_file = output_file.replace('.scad', '_frame.scad')
-            
+            main_file = output_file.replace(".scad", "_main.scad")
+            frame_file = output_file.replace(".scad", "_frame.scad")
+
             # Write main model
-            with open(main_file, 'w') as f:
+            with open(main_file, "w") as f:
                 f.write(main_scad)
-            
+
             # Write frame
-            with open(frame_file, 'w') as f:
+            with open(frame_file, "w") as f:
                 f.write(frame_scad)
-            
+
             self.print_debug(f"\nSuccessfully created main model: {main_file}")
             self.print_debug(f"Successfully created frame: {frame_file}")
             self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
-            
+
             # Write debug log if needed
             if self.debug:
-                log_file = output_file + '.log'
-                with open(log_file, 'w') as f:
-                    f.write('\n'.join(self.debug_log))
+                log_file = output_file + ".log"
+                with open(log_file, "w") as f:
+                    f.write("\n".join(self.debug_log))
                 self.print_debug(f"\nDebug log written to {log_file}")
-            
+
         except Exception as e:
             print(f"Error: {str(e)}")
             raise

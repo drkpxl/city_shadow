@@ -1,5 +1,4 @@
-# lib/preprocessor.py (updated with geometric clipping using Shapely)
-
+# lib/preprocessor.py
 from copy import deepcopy
 import json
 import statistics
@@ -20,7 +19,7 @@ class GeoJSONPreprocessor:
     def create_cropping_geometry(self, features):
         """
         Create a Shapely geometry to use for cropping. Either a bounding box
-        or a circular buffer (approximating the given distance in meters) is used.
+        or a circular buffer.
         """
         if self.distance:
             # Calculate center from all features
@@ -84,12 +83,11 @@ class GeoJSONPreprocessor:
                 print(f"Failed to parse geometry: {e}")
             return None
 
-        # Compute the intersection with the cropping geometry
         clipped = geom.intersection(cropping_geom)
         if clipped.is_empty:
             return None
 
-        # Handle GeometryCollection by selecting a valid geometry if possible
+        # If geometrycollection, pick a valid geometry
         if clipped.geom_type == "GeometryCollection":
             valid_geoms = [
                 g
@@ -99,7 +97,7 @@ class GeoJSONPreprocessor:
             ]
             if not valid_geoms:
                 return None
-            # Pick the largest polygon if available; otherwise use the first valid geometry
+            # Pick the largest polygon if available; else first valid
             polygons = [
                 g for g in valid_geoms if g.geom_type in ["Polygon", "MultiPolygon"]
             ]
