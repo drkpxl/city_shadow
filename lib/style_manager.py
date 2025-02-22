@@ -25,11 +25,11 @@ class StyleManager:
         """Get default layer specifications without border insets"""
         return {
             "water": {
-                "depth": 2.4,
+                "depth": 3,
             },
             "roads": {
-                "depth": 3,
-                "width": 4.0,
+                "depth": 2,
+                "width": 2.0,
             },
             "railways": {
                 "depth": 1.2,

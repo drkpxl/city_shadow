@@ -16,8 +16,7 @@ codebase.md
 # geojson_to_shadow_city.py
 
 ```py
-# geojson_to_shadow_city.py
-
+#!/usr/bin/env python3
 import argparse
 import time
 from lib.converter import EnhancedCityConverter
@@ -28,7 +27,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Convert GeoJSON to artistic 3D city model'
     )
-    # Existing arguments
+    # Basic arguments
     parser.add_argument('input_json', help='Input GeoJSON file')
     parser.add_argument('output_scad', help='Output OpenSCAD file')
     parser.add_argument('--size', type=float, default=200,
@@ -64,14 +63,25 @@ def main():
                                metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
                                help='Bounding box coordinates for cropping')
 
-    # New preview and integration arguments
+    # Export format group
+    export_group = parser.add_argument_group('Export Options')
+    export_group.add_argument('--export', choices=['preview', 'stl', 'both'],
+                          help='Export format (preview image, STL, or both)')
+    export_group.add_argument('--output-stl',
+                          help='Output STL filename (default: based on SCAD filename)')
+    export_group.add_argument('--no-repair', action='store_true',
+                          help='Disable automatic geometry repair attempts')
+    export_group.add_argument('--force', action='store_true',
+                          help='Force STL generation even if validation fails')
+    
+    # Preview options
     preview_group = parser.add_argument_group('Preview and Integration')
-    preview_group.add_argument('--preview', action='store_true',
-                            help='Generate PNG preview of the model')
     preview_group.add_argument('--preview-size', type=int, nargs=2, 
                             metavar=('WIDTH', 'HEIGHT'),
-                            default=[800, 600],
+                            default=[1920, 1080],
                             help='Preview image size in pixels')
+    preview_group.add_argument('--preview-file',
+                            help='Preview image filename (default: based on SCAD filename)')
     preview_group.add_argument('--watch', action='store_true',
                             help='Watch SCAD file and auto-reload in OpenSCAD')
     preview_group.add_argument('--openscad-path',
@@ -119,35 +129,52 @@ def main():
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
 
-        # Handle preview and integration features
-        if args.preview or args.watch:
-            try:
-                integration = OpenSCADIntegration(args.openscad_path)
-                
-                if args.preview:
-                    preview_file = args.output_scad.replace('.scad', '_preview.png')
-                    print(f"\nGenerating preview image: {preview_file}")
-                    integration.generate_preview(
-                        args.output_scad,
-                        preview_file,
-                        args.preview_size
-                    )
-                    
-                if args.watch:
-                    print("\nStarting OpenSCAD integration...")
-                    print("Press Ctrl+C to stop watching")
-                    integration.watch_and_reload(args.output_scad)
-                    try:
-                        while True:
-                            time.sleep(1)
-                    except KeyboardInterrupt:
-                        integration.stop_watching()
-                        print("\nStopped watching SCAD file")
+        # Handle exports if requested
+        if args.export or args.watch:
+            integration = OpenSCADIntegration(args.openscad_path)
             
-            except Exception as e:
-                print(f"Warning: Preview/integration features failed: {e}")
-                if args.watch:
-                    print("Try opening OpenSCAD manually")
+            # Determine output filenames
+            stl_file = args.output_stl or args.output_scad.replace('.scad', '.stl')
+            preview_file = args.preview_file or args.output_scad.replace('.scad', '_preview.png')
+
+            if args.export in ['preview', 'both']:
+                print("\nGenerating preview image...")
+                integration.generate_preview(
+                    args.output_scad,
+                    preview_file,
+                    size=args.preview_size
+                )
+
+            if args.export in ['stl', 'both']:
+                print("\nGenerating STL file...")
+                try:
+                    integration.generate_stl(
+                        args.output_scad,
+                        stl_file,
+                        repair=not args.no_repair
+                    )
+                except Exception as e:
+                    if args.force:
+                        print(f"Warning: {str(e)}")
+                        print("Forcing STL generation due to --force flag...")
+                        integration.generate_stl(
+                            args.output_scad,
+                            stl_file,
+                            repair=False
+                        )
+                    else:
+                        raise
+
+            if args.watch:
+                print("\nStarting OpenSCAD integration...")
+                print("Press Ctrl+C to stop watching")
+                integration.watch_and_reload(args.output_scad)
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    integration.stop_watching()
+                    print("\nStopped watching SCAD file")
 
     except Exception as e:
         print(f"Error: {str(e)}")
@@ -328,75 +355,129 @@ difference() {{
 # lib/feature_processor.py
 from .geometry import GeometryUtils
 
+
 class FeatureProcessor:
     def __init__(self, style_manager):
         self.style_manager = style_manager
         self.geometry = GeometryUtils()
+        self.debug = False
 
     def process_features(self, geojson_data, size):
         """Process and enhance GeoJSON features"""
         transform = self.geometry.create_coordinate_transformer(
-            geojson_data['features'],
-            size
+            geojson_data["features"], size
         )
-        
-        features = {
-            'water': [],
-            'roads': [],
-            'railways': [],
-            'buildings': []
-        }
-        
+
+        features = {"water": [], "roads": [], "railways": [], "buildings": []}
+
         # Process each feature type
-        for feature in geojson_data['features']:
+        for feature in geojson_data["features"]:
             self._process_single_feature(feature, features, transform)
-        
+
+        # Log feature counts if in debug mode
+        if self.debug:
+            print(f"\nProcessed feature counts:")
+            print(f"Water features: {len(features['water'])}")
+            print(f"Road features: {len(features['roads'])}")
+            print(f"Railway features: {len(features['railways'])}")
+            print(f"Building features: {len(features['buildings'])}")
+
         # Apply building merging/clustering
-        features['buildings'] = self.style_manager.merge_nearby_buildings(features['buildings'])
-        
+        features["buildings"] = self.style_manager.merge_nearby_buildings(
+            features["buildings"]
+        )
+
         return features
 
     def _process_single_feature(self, feature, features, transform):
         """Process a single GeoJSON feature"""
-        props = feature.get('properties', {})
+        props = feature.get("properties", {})
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
-            
+
         # If this is a building, check area:
-        if 'building' in props:
+        if "building" in props:
             area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-            min_area = self.style_manager.style.get('min_building_area', 600.0)
-            
+            min_area = self.style_manager.style.get("min_building_area", 600.0)
+
             if area_m2 < min_area:
-                return  # skip small buildings
-            
-            # Otherwise, transform coordinates and store the building
+                if self.debug:
+                    print(f"Skipping small building with area {area_m2:.1f}m²")
+                return
+
+            # Transform coordinates and store the building
             transformed = [transform(lon, lat) for lon, lat in coords]
             height = self.style_manager.scale_building_height(props)
-            features['buildings'].append({
-                'coords': transformed,
-                'height': height
-            })
-        # Handle parking features explicitly
-        elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
+            features["buildings"].append({"coords": transformed, "height": height})
+            if self.debug:
+                print(
+                    f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²"
+                )
+
+        # Handle roads (excluding tunnels)
+        elif "highway" in props:
+            # Skip if it's a tunnel
+            if props.get("tunnel") in ["yes", "true", "1"]:
+                if self.debug:
+                    print(f"Skipping tunnel road of type '{props.get('highway')}'")
+                return
+
             transformed = [transform(lon, lat) for lon, lat in coords]
-            features['roads'].append({
-                'coords': transformed,
-                'is_parking': True
-            })
-        elif 'highway' in props:
+            if len(transformed) >= 2:  # Ensure we have enough points for a road
+                road_type = props.get("highway", "unknown")
+                features["roads"].append(
+                    {"coords": transformed, "type": road_type, "is_parking": False}
+                )
+                if self.debug:
+                    print(
+                        f"Added road of type '{road_type}' with {len(transformed)} points"
+                    )
+
+        # Handle parking areas and service roads
+        elif (
+            props.get("amenity") == "parking"
+            or props.get("parking") == "surface"
+            or props.get("service") == "parking_aisle"
+        ):
             transformed = [transform(lon, lat) for lon, lat in coords]
-            features['roads'].append({
-                'coords': transformed,
-                'is_parking': False
-            })
-        elif 'railway' in props:
+            if len(transformed) >= 3:  # Ensure we have enough points for a polygon
+                features["roads"].append(
+                    {"coords": transformed, "type": "parking", "is_parking": True}
+                )
+                if self.debug:
+                    print(f"Added parking area with {len(transformed)} points")
+
+        # Handle railways (excluding tunnels)
+        elif "railway" in props:
+            # Skip if it's a tunnel
+            if props.get("tunnel") in ["yes", "true", "1"]:
+                if self.debug:
+                    print(f"Skipping tunnel railway of type '{props.get('railway')}'")
+                return
+
             transformed = [transform(lon, lat) for lon, lat in coords]
-            features['railways'].append(transformed)
-        elif 'natural' in props and props['natural'] == 'water':
+            if len(transformed) >= 2:  # Ensure we have enough points
+                features["railways"].append(
+                    {"coords": transformed, "type": props.get("railway", "unknown")}
+                )
+                if self.debug:
+                    print(
+                        f"Added railway of type '{props.get('railway', 'unknown')}' with {len(transformed)} points"
+                    )
+
+        # Handle water features
+        elif "natural" in props and props["natural"] == "water":
             transformed = [transform(lon, lat) for lon, lat in coords]
-            features['water'].append(transformed)
+            if len(transformed) >= 3:  # Ensure we have enough points for a polygon
+                features["water"].append(
+                    {"coords": transformed, "type": props.get("water", "unknown")}
+                )
+                if self.debug:
+                    print(
+                        f"Added water feature of type '{props.get('water', 'unknown')}' with {len(transformed)} points"
+                    )
+
 ```
 
 # lib/geometry.py
@@ -751,17 +832,25 @@ from PIL import Image, ImageEnhance
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+
 class OpenSCADIntegration:
     def __init__(self, openscad_path=None):
         """Initialize OpenSCAD integration with an optional path to the OpenSCAD executable."""
         self.openscad_path = openscad_path or self._find_openscad()
         if not self.openscad_path:
             raise RuntimeError("Could not find OpenSCAD executable")
-            
+
         # For file watching
         self.observer = None
         self.watch_thread = None
         self.running = False
+
+        # Export quality settings
+        self.export_quality = {
+            "fn": 256,  # High-quality circles
+            "fa": 2,  # Minimum angle (degrees)
+            "fs": 0.2,  # Minimum size (mm)
+        }
 
     def _find_openscad(self):
         """Find the OpenSCAD executable based on the current platform."""
@@ -776,7 +865,9 @@ class OpenSCADIntegration:
         elif sys.platform == "darwin":
             possible_paths = [
                 "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
-                os.path.expanduser("~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"),
+                os.path.expanduser(
+                    "~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+                ),
             ]
             for path in possible_paths:
                 if os.path.exists(path):
@@ -789,64 +880,210 @@ class OpenSCADIntegration:
         return None
 
     def generate_preview(self, output_file, output_image, size=(1920, 1080)):
-        """
-        Generate a PNG preview of the main SCAD file (output_main.scad) using a shell command.
-        
-        This method assumes that the conversion process produces two SCAD files:
-          - output_main.scad (the main 3D model)
-          - output_frame.scad (the decorative frame)
-          
-        It derives the main file by replacing '.scad' with '_main.scad' in the provided output_file.
-        """
-        # Derive the main SCAD file from the provided output file.
-        main_scad_file = output_file.replace('.scad', '_main.scad')
+        """Generate a high-quality PNG preview of the SCAD file."""
+        # Get paths for main and frame files
+        main_scad_file = output_file.replace(".scad", "_main.scad")
+        frame_scad_file = output_file.replace(".scad", "_frame.scad")
         main_scad_file = os.path.abspath(main_scad_file)
+        frame_scad_file = os.path.abspath(frame_scad_file)
         output_image = os.path.abspath(output_image)
-        print("SCAD file path:", main_scad_file)
-        print("Output image path:", output_image)
+
+        # Check if files exist
+        if not os.path.exists(main_scad_file):
+            raise FileNotFoundError(f"Main SCAD file not found: {main_scad_file}")
+        if not os.path.exists(frame_scad_file):
+            raise FileNotFoundError(f"Frame SCAD file not found: {frame_scad_file}")
 
         # Set environment variable explicitly
         env = os.environ.copy()
         env["OPENSCAD_HEADLESS"] = "1"
 
-        # Build the command (adjust the image size if needed)
-        command = [
+        # Generate preview for main model
+        main_preview = output_image.replace(".png", "_main.png")
+        command_main = [
             self.openscad_path,
-            '--render',
-            '--imgsize', f'{size[0]},{size[1]}',
-            '--autocenter',
-            '--colorscheme=Nature',
-            '-o', output_image,
-            main_scad_file
+            "--preview=throwntogether",
+            "--imgsize",
+            f"{size[0]},{size[1]}",
+            "--autocenter",
+            "--viewall",
+            "--colorscheme=Nature",
+            "--projection=perspective",
+            "-o",
+            main_preview,
+            main_scad_file,
         ]
 
-        print("Running command:", " ".join(command))
+        # Generate preview for frame
+        frame_preview = output_image.replace(".png", "_frame.png")
+        command_frame = [
+            self.openscad_path,
+            "--preview=throwntogether",
+            "--imgsize",
+            f"{size[0]},{size[1]}",
+            "--autocenter",
+            "--viewall",
+            "--colorscheme=Nature",
+            "--projection=perspective",
+            "-o",
+            frame_preview,
+            frame_scad_file,
+        ]
+
         try:
-            result = subprocess.run(
-                command,
+            print("\nGenerating preview for main model...")
+            result_main = subprocess.run(
+                command_main,
                 env=env,
                 cwd=os.path.dirname(main_scad_file),
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
-            print("Subprocess stdout:", result.stdout)
-            print("Subprocess stderr:", result.stderr)
-            print(f"Preview image generated: {output_image}")
+
+            print("Generating preview for frame...")
+            result_frame = subprocess.run(
+                command_frame,
+                env=env,
+                cwd=os.path.dirname(frame_scad_file),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            print(f"Preview images generated:")
+            print(f"Main model: {main_preview}")
+            print(f"Frame: {frame_preview}")
+            return True
+
         except subprocess.CalledProcessError as e:
             print("Error generating preview:", e)
-            print("Subprocess stdout:", e.stdout)
-            print("Subprocess stderr:", e.stderr)
+            print("OpenSCAD output:", e.stdout)
+            print("OpenSCAD errors:", e.stderr)
+            return False
+
+    def generate_stl(self, scad_file, output_stl, repair=True):
+        """
+        Generate high-quality STL files for both main model and frame.
+
+        Args:
+            scad_file (str): Path to input SCAD file
+            output_stl (str): Path for output STL file
+            repair (bool): Not used, kept for backwards compatibility
+        """
+        try:
+            # Get paths for main and frame files
+            main_scad_file = scad_file.replace(".scad", "_main.scad")
+            frame_scad_file = scad_file.replace(".scad", "_frame.scad")
+            main_scad_file = os.path.abspath(main_scad_file)
+            frame_scad_file = os.path.abspath(frame_scad_file)
+
+            # Generate output STL paths
+            main_stl = output_stl.replace(".stl", "_main.stl")
+            frame_stl = output_stl.replace(".stl", "_frame.stl")
+            main_stl = os.path.abspath(main_stl)
+            frame_stl = os.path.abspath(frame_stl)
+
+            # Check if input files exist
+            if not os.path.exists(main_scad_file):
+                raise FileNotFoundError(f"Main SCAD file not found: {main_scad_file}")
+            if not os.path.exists(frame_scad_file):
+                raise FileNotFoundError(f"Frame SCAD file not found: {frame_scad_file}")
+
+            # Set environment variables for headless operation
+            env = os.environ.copy()
+            env["OPENSCAD_HEADLESS"] = "1"
+
+            # Prepare high-quality export commands
+            command_main = [
+                self.openscad_path,
+                "--backend=Manifold",
+                "--export-format=binstl",
+                "-o",
+                main_stl,
+                "-D",
+                f'$fn={self.export_quality["fn"]}',
+                "-D",
+                f'$fa={self.export_quality["fa"]}',
+                "-D",
+                f'$fs={self.export_quality["fs"]}',
+                main_scad_file,
+            ]
+
+            command_frame = [
+                self.openscad_path,
+                "--backend=Manifold",
+                "--export-format=binstl",
+                "-o",
+                frame_stl,
+                "-D",
+                f'$fn={self.export_quality["fn"]}',
+                "-D",
+                f'$fa={self.export_quality["fa"]}',
+                "-D",
+                f'$fs={self.export_quality["fs"]}',
+                frame_scad_file,
+            ]
+
+            print("\nGenerating high-quality STL files")
+            print("Using quality settings:")
+            print(f"  $fn: {self.export_quality['fn']}")
+            print(f"  $fa: {self.export_quality['fa']}")
+            print(f"  $fs: {self.export_quality['fs']}")
+
+            # Generate main model STL
+            print("\nGenerating main model STL...")
+            result_main = subprocess.run(
+                command_main,
+                env=env,
+                cwd=os.path.dirname(main_scad_file),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            # Generate frame STL
+            print("Generating frame STL...")
+            result_frame = subprocess.run(
+                command_frame,
+                env=env,
+                cwd=os.path.dirname(frame_scad_file),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            # Verify the exports
+            if not os.path.exists(main_stl):
+                raise RuntimeError(f"Main STL file was not created: {main_stl}")
+            if not os.path.exists(frame_stl):
+                raise RuntimeError(f"Frame STL file was not created: {frame_stl}")
+
+            main_size = os.path.getsize(main_stl)
+            frame_size = os.path.getsize(frame_stl)
+
+            print(f"\nSuccessfully generated STL files:")
+            print(f"Main model: {main_stl} ({main_size/1024/1024:.1f} MB)")
+            print(f"Frame: {frame_stl} ({frame_size/1024/1024:.1f} MB)")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            print("Error generating STL:", e)
+            print("OpenSCAD output:", e.stdout if e.stdout else "No output")
+            print("OpenSCAD errors:", e.stderr if e.stderr else "No errors")
+            raise
+        except Exception as e:
+            print(f"Error generating STL: {str(e)}")
+            raise
 
     def watch_and_reload(self, scad_file):
-        """Watch the SCAD file and trigger a reload in OpenSCAD when it changes."""
+        """Watch the SCAD file and trigger auto-reload in OpenSCAD."""
         if not self.openscad_path:
             raise RuntimeError("OpenSCAD not found")
 
-        # First, open the file in OpenSCAD.
+        # First, open the file in OpenSCAD
         subprocess.Popen([self.openscad_path, scad_file])
 
-        # Set up file watching.
         class SCDHandler(FileSystemEventHandler):
             def __init__(self, scad_path):
                 self.scad_path = scad_path
@@ -860,30 +1097,52 @@ class OpenSCADIntegration:
                         if sys.platform == "win32":
                             import win32gui
                             import win32con
+
                             def callback(hwnd, _):
                                 if "OpenSCAD" in win32gui.GetWindowText(hwnd):
                                     win32gui.SetForegroundWindow(hwnd)
-                                    win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, win32con.VK_F5, 0)
+                                    win32gui.PostMessage(
+                                        hwnd, win32con.WM_KEYDOWN, win32con.VK_F5, 0
+                                    )
+
                             win32gui.EnumWindows(callback, None)
                         elif sys.platform == "darwin":
-                            subprocess.run(["osascript", "-e", 
-                                'tell application "OpenSCAD" to activate\n' +
-                                'tell application "System Events"\n' +
-                                'keystroke "r" using {command down}\n' +
-                                'end tell'])
+                            subprocess.run(
+                                [
+                                    "osascript",
+                                    "-e",
+                                    'tell application "OpenSCAD" to activate\n'
+                                    + 'tell application "System Events"\n'
+                                    + 'keystroke "r" using {command down}\n'
+                                    + "end tell",
+                                ]
+                            )
                         else:  # Linux
                             try:
-                                subprocess.run(["xdotool", "search", "--name", "OpenSCAD", 
-                                              "windowactivate", "--sync", "key", "F5"])
+                                subprocess.run(
+                                    [
+                                        "xdotool",
+                                        "search",
+                                        "--name",
+                                        "OpenSCAD",
+                                        "windowactivate",
+                                        "--sync",
+                                        "key",
+                                        "F5",
+                                    ]
+                                )
                             except:
-                                print("Warning: xdotool not found. Auto-reload may not work on Linux.")
+                                print(
+                                    "Warning: xdotool not found. Auto-reload may not work on Linux."
+                                )
                         self.last_reload = current_time
 
-        # Start watching the file.
         self.running = True
         event_handler = SCDHandler(os.path.abspath(scad_file))
         self.observer = Observer()
-        self.observer.schedule(event_handler, os.path.dirname(scad_file), recursive=False)
+        self.observer.schedule(
+            event_handler, os.path.dirname(scad_file), recursive=False
+        )
         self.observer.start()
 
         def watch_thread():
@@ -911,6 +1170,7 @@ class OpenSCADIntegration:
 # lib/scad_generator.py
 from .geometry import GeometryUtils
 
+
 class ScadGenerator:
     def __init__(self, style_manager):
         self.style_manager = style_manager
@@ -918,145 +1178,159 @@ class ScadGenerator:
 
     def generate_openscad(self, features, size, layer_specs):
         """Generate complete OpenSCAD code for main model without frame"""
-        # Start with header and base
-        scad = self._generate_header(size, layer_specs)
-        
-        # Add features
-        scad.extend(self._generate_water_features(features['water'], layer_specs))
-        scad.append('        }')  # Close water features union
-        scad.extend(self._generate_road_features(features['roads'], layer_specs))
-        scad.extend(self._generate_railway_features(features['railways'], layer_specs))
-        scad.append('    }')  # Close main difference
-        scad.extend(self._generate_building_features(features['buildings'], layer_specs))
-        
-        # Close main union
-        scad.append('}')
-        return '\n'.join(scad)
-
-    def _generate_header(self, size, layer_specs):
-        """Generate OpenSCAD file header and base structure"""
-        return [
-            f'''// Generated with Enhanced City Converter
+        scad = [
+            f"""// Generated with Enhanced City Converter
 // Style: {self.style_manager.style['artistic_style']}
 // Detail Level: {self.style_manager.style['detail_level']}
 
 // Main city model without frame
-union() {{
-    difference() {{
+difference() {{  // Main difference that affects everything
+    union() {{
         // Base
         cube([{size}, {size}, {layer_specs['base']['height']}]);
         
-        // Start features
-        union() {{'''
+        // Add buildings on top of base
+        {self._generate_building_features(features['buildings'], layer_specs)}
+    }}
+    
+    // Subtractive features (water, roads, railways)
+    union() {{
+        {self._generate_water_features(features['water'], layer_specs)}
+        {self._generate_road_features(features['roads'], layer_specs)}
+        {self._generate_railway_features(features['railways'], layer_specs)}
+    }}
+}}"""
         ]
+
+        return "\n".join(scad)
 
     def _generate_water_features(self, water_features, layer_specs):
         """Generate OpenSCAD code for water features"""
         scad = []
-        base_height = layer_specs['base']['height']
-        water_depth = layer_specs['water']['depth']
-        
+        base_height = layer_specs["base"]["height"]
+        water_depth = layer_specs["water"]["depth"]
+
         for i, water in enumerate(water_features):
-            points_str = self.geometry.generate_polygon_points(water)
+            coords = water.get("coords", water)
+            points_str = self.geometry.generate_polygon_points(coords)
             if points_str:
-                scad.extend([
-                    f'''
-            // Water body {i+1}
-            translate([0, 0, {base_height - water_depth}])
-                linear_extrude(height={water_depth + 0.1}, convexity=2)
-                    polygon([{points_str}]);'''
-                ])
-        
-        return scad
+                scad.extend(
+                    [
+                        f"""
+        // Water body {i+1}
+        translate([0, 0, {base_height - water_depth}])
+            linear_extrude(height={water_depth + 0.1}, convexity=2)
+                polygon([{points_str}]);"""
+                    ]
+                )
+
+        return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
         """Generate OpenSCAD code for road features"""
         scad = []
-        base_height = layer_specs['base']['height']
-        road_depth = layer_specs['roads']['depth']
-        road_width = layer_specs['roads']['width']
-        
+        base_height = layer_specs["base"]["height"]
+        road_depth = layer_specs["roads"]["depth"]
+        road_width = layer_specs["roads"]["width"]
+
+        print(f"\nGenerating road features:")
+        print(f"Number of roads: {len(road_features)}")
+        print(f"Road depth: {road_depth}mm")
+        print(f"Road width: {road_width}mm")
+
         for i, road in enumerate(road_features):
             if isinstance(road, dict):
-                pts = road.get('coords', road)
-                if road.get('is_parking'):
-                    points_str = self.geometry.generate_polygon_points(pts)
-                else:
-                    points_str = self.geometry.generate_buffered_polygon(pts, road_width)
+                coords = road.get("coords", [])
+                is_parking = road.get("is_parking", False)
+                points_str = None
+
+                if is_parking and len(coords) >= 3:
+                    points_str = self.geometry.generate_polygon_points(coords)
+                elif len(coords) >= 2:
+                    points_str = self.geometry.generate_buffered_polygon(
+                        coords, road_width
+                    )
             else:
-                pts = road
-                points_str = self.geometry.generate_buffered_polygon(pts, road_width)
-                
+                points_str = self.geometry.generate_buffered_polygon(road, road_width)
+
             if points_str:
-                scad.extend([
-                    f'''
+                scad.extend(
+                    [
+                        f"""
         // Road {i+1}
         translate([0, 0, {base_height - road_depth}])
             linear_extrude(height={road_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);'''
-                ])
-        
-        return scad
+                polygon([{points_str}]);"""
+                    ]
+                )
+
+        return "\n".join(scad)
 
     def _generate_railway_features(self, railway_features, layer_specs):
         """Generate OpenSCAD code for railway features"""
         scad = []
-        base_height = layer_specs['base']['height']
-        railway_depth = layer_specs['railways']['depth']
-        railway_width = layer_specs['railways']['width']
-        
+        base_height = layer_specs["base"]["height"]
+        railway_depth = layer_specs["railways"]["depth"]
+        railway_width = layer_specs["railways"]["width"]
+
         for i, railway in enumerate(railway_features):
-            points = self.geometry.generate_buffered_polygon(railway, railway_width)
-            if points:
-                scad.extend([
-                    f'''
+            coords = railway.get("coords", []) if isinstance(railway, dict) else railway
+            if len(coords) >= 2:
+                points_str = self.geometry.generate_buffered_polygon(
+                    coords, railway_width
+                )
+                if points_str:
+                    scad.extend(
+                        [
+                            f"""
         // Railway {i+1}
         translate([0, 0, {base_height - railway_depth}])
             linear_extrude(height={railway_depth + 0.1}, convexity=2)
-                polygon([{points}]);'''
-                ])
-        
-        return scad
+                polygon([{points_str}]);"""
+                        ]
+                    )
+
+        return "\n".join(scad)
 
     def _generate_building_features(self, building_features, layer_specs):
         """Generate OpenSCAD code for building features"""
         scad = []
-        base_height = layer_specs['base']['height']
-        
+        base_height = layer_specs["base"]["height"]
+
         for i, building in enumerate(building_features):
-            points_str = self.geometry.generate_polygon_points(building['coords'])
+            points_str = self.geometry.generate_polygon_points(building["coords"])
             if not points_str:
                 continue
-                
-            is_cluster = building.get('is_cluster', False)
-            building_height = building['height']
-            
+
+            is_cluster = building.get("is_cluster", False)
+            building_height = building["height"]
+
             # Generate building with appropriate style
             details = self._generate_building_details(
-                points_str, 
-                building_height, 
-                is_cluster
+                points_str, building_height, is_cluster
             )
-            
-            scad.extend([
-                f'''
+
+            scad.extend(
+                [
+                    f"""
     // {"Building Cluster" if is_cluster else "Building"} {i+1}
     translate([0, 0, {base_height}]) {{
         {details}
-    }}'''
-            ])
-        
-        return scad
+    }}"""
+                ]
+            )
+
+        return "\n".join(scad)
 
     def _generate_building_details(self, points_str, height, is_cluster):
         """Generate architectural details based on style"""
-        if not is_cluster or self.style_manager.style['detail_level'] < 0.5:
-            return f'''
+        if not is_cluster or self.style_manager.style["detail_level"] < 0.5:
+            return f"""
                 linear_extrude(height={height}, convexity=2)
-                    polygon([{points_str}]);'''
-            
-        if self.style_manager.style['artistic_style'] == 'modern':
-            return f'''
+                    polygon([{points_str}]);"""
+
+        if self.style_manager.style["artistic_style"] == "modern":
+            return f"""
                 union() {{
                     linear_extrude(height={height}, convexity=2)
                         polygon([{points_str}]);
@@ -1064,10 +1338,10 @@ union() {{
                         linear_extrude(height=0.8, convexity=2)
                             offset(r=-0.8)
                                 polygon([{points_str}]);
-                }}'''
-                
-        elif self.style_manager.style['artistic_style'] == 'classic':
-            return f'''
+                }}"""
+
+        elif self.style_manager.style["artistic_style"] == "classic":
+            return f"""
                 union() {{
                     linear_extrude(height={height}, convexity=2)
                         polygon([{points_str}]);
@@ -1075,12 +1349,13 @@ union() {{
                         linear_extrude(height={height * 0.2}, convexity=2)
                             offset(r=-0.5)
                                 polygon([{points_str}]);
-                }}'''
-        
+                }}"""
+
         else:  # minimal
-            return f'''
+            return f"""
                 linear_extrude(height={height}, convexity=2)
-                    polygon([{points_str}]);'''
+                    polygon([{points_str}]);"""
+
 ```
 
 # lib/style_manager.py
@@ -1090,20 +1365,21 @@ union() {{
 from math import log10, sin, cos, pi, atan2
 from .geometry import GeometryUtils
 
+
 class StyleManager:
     def __init__(self, style_settings=None):
         self.geometry = GeometryUtils()
-        
+
         # Default style settings
         self.style = {
-            'merge_distance': 2.0,
-            'cluster_size': 3.0,
-            'height_variance': 0.2,
-            'detail_level': 1.0,
-            'artistic_style': 'modern',
-            'min_building_area': 600.0
+            "merge_distance": 2.0,
+            "cluster_size": 3.0,
+            "height_variance": 0.2,
+            "detail_level": 1.0,
+            "artistic_style": "modern",
+            "min_building_area": 600.0,
         }
-        
+
         # Override defaults with provided settings
         if style_settings:
             self.style.update(style_settings)
@@ -1111,251 +1387,261 @@ class StyleManager:
     def get_default_layer_specs(self):
         """Get default layer specifications without border insets"""
         return {
-            'water': {
-                'depth': 2,
+            "water": {
+                "depth": 3,
             },
-            'roads': {
-                'depth': 1,
-                'width': 2.0,
+            "roads": {
+                "depth": 2,
+                "width": 2.0,
             },
-            'railways': {
-                'depth': 1.4,
-                'width': 1.5,
+            "railways": {
+                "depth": 1.2,
+                "width": 1.5,
             },
-            'buildings': {
-                'min_height': 2,
-                'max_height': 6
+            "buildings": {"min_height": 2, "max_height": 6},
+            "base": {
+                "height": 10,  # Base height of 10mm
             },
-            'base': {
-                'height': 10,  # Base height of 10mm
-            }
         }
 
     def scale_building_height(self, properties):
         """Scale building height using log scaling"""
         default_height = 5
-        
+
         height_m = None
-        if 'height' in properties:
+        if "height" in properties:
             try:
-                height_m = float(properties['height'].split()[0])
+                height_m = float(properties["height"].split()[0])
             except (ValueError, IndexError):
                 pass
-        elif 'building:levels' in properties:
+        elif "building:levels" in properties:
             try:
-                levels = float(properties['building:levels'])
+                levels = float(properties["building:levels"])
                 height_m = levels * 3
             except ValueError:
                 pass
-        
+
         height_m = height_m if height_m is not None else default_height
-            
-        min_height = self.get_default_layer_specs()['buildings']['min_height']
-        max_height = self.get_default_layer_specs()['buildings']['max_height']
-        
+
+        min_height = self.get_default_layer_specs()["buildings"]["min_height"]
+        max_height = self.get_default_layer_specs()["buildings"]["max_height"]
+
         log_height = log10(height_m + 1)
         log_min = log10(1)
         log_max = log10(101)
-        
+
         scaled_height = (log_height - log_min) / (log_max - log_min)
         final_height = min_height + scaled_height * (max_height - min_height)
-        
+
         return round(final_height, 2)
 
     def merge_nearby_buildings(self, buildings):
         """Merge buildings that are close to each other into clusters"""
         # If merge_distance is 0, skip merging entirely
-        if self.style['merge_distance'] <= 0:
+        if self.style["merge_distance"] <= 0:
             return buildings
-            
+
         clusters = []
         processed = set()
-        
+
         for i, building in enumerate(buildings):
             if i in processed:
                 continue
-                
+
             cluster = [building]
             processed.add(i)
-            
+
             # Find nearby buildings
-            center = self.geometry.calculate_centroid(building['coords'])
-            
+            center = self.geometry.calculate_centroid(building["coords"])
+
             for j, other in enumerate(buildings):
                 if j in processed:
                     continue
-                    
-                other_center = self.geometry.calculate_centroid(other['coords'])
+
+                other_center = self.geometry.calculate_centroid(other["coords"])
                 distance = self.geometry.calculate_distance(center, other_center)
-                
-                if distance < self.style['merge_distance']:
+
+                if distance < self.style["merge_distance"]:
                     cluster.append(other)
                     processed.add(j)
-            
+
             clusters.append(self._merge_building_cluster(cluster))
-        
+
         return clusters
 
     def _merge_building_cluster(self, cluster):
         """Merge a cluster of buildings into a single artistic structure"""
         if len(cluster) == 1:
             return cluster[0]
-            
+
         # Calculate weighted height for the cluster
         total_area = 0
         weighted_height = 0
         for building in cluster:
-            area = self.geometry.calculate_polygon_area(building['coords'])
+            area = self.geometry.calculate_polygon_area(building["coords"])
             total_area += area
-            weighted_height += building['height'] * area
-        
-        avg_height = weighted_height / total_area if total_area > 0 else cluster[0]['height']
-        
+            weighted_height += building["height"] * area
+
+        avg_height = (
+            weighted_height / total_area if total_area > 0 else cluster[0]["height"]
+        )
+
         # Combine polygons with artistic variation
         combined_coords = []
         for building in cluster:
-            coords = building['coords']
+            coords = building["coords"]
             varied_coords = self._add_artistic_variation(coords)
             combined_coords.extend(varied_coords)
-        
+
         # Create hull around combined coordinates
         hull = self._create_artistic_hull(combined_coords)
-        
+
         return {
-            'coords': hull,
-            'height': avg_height,
-            'is_cluster': True,
-            'size': len(cluster)
+            "coords": hull,
+            "height": avg_height,
+            "is_cluster": True,
+            "size": len(cluster),
         }
 
     def _add_artistic_variation(self, coords):
         """Add variations to building coords based on style"""
         varied = []
-        variance = self.style['height_variance']
-        
-        if self.style['artistic_style'] == 'modern':
+        variance = self.style["height_variance"]
+
+        if self.style["artistic_style"] == "modern":
             # Add angular variations
             from math import sin, pi
+
             for i, coord in enumerate(coords):
                 x, y = coord
                 offset = variance * sin(i * pi / len(coords))
                 varied.append([x + offset, y + offset])
-        
-        elif self.style['artistic_style'] == 'classic':
+
+        elif self.style["artistic_style"] == "classic":
             # Add curved variations
             from math import sin, cos, pi
+
             for i, coord in enumerate(coords):
                 x, y = coord
                 angle = 2 * pi * i / len(coords)
                 offset_x = variance * cos(angle)
                 offset_y = variance * sin(angle)
                 varied.append([x + offset_x, y + offset_y])
-        
+
         else:  # minimal
             varied = coords
-            
+
         return varied
 
     def _create_artistic_hull(self, points):
         """Create an artistic hull around points based on style settings"""
         if len(points) < 3:
             return points
-            
+
         from math import atan2, pi, sin
+
         center = self.geometry.calculate_centroid(points)
-        sorted_points = sorted(points, 
-            key=lambda p: atan2(p[1] - center[1], p[0] - center[0]))
-        
+        sorted_points = sorted(
+            points, key=lambda p: atan2(p[1] - center[1], p[0] - center[0])
+        )
+
         hull = []
-        detail_level = self.style['detail_level']
-        
+        detail_level = self.style["detail_level"]
+
         for i in range(len(sorted_points)):
             p1 = sorted_points[i]
             p2 = sorted_points[(i + 1) % len(sorted_points)]
-            
+
             hull.append(p1)
-            
+
             if detail_level > 0.5:
                 # Add intermediate points for visual interest
                 dist = self.geometry.calculate_distance(p1, p2)
-                if dist > self.style['cluster_size']:
+                if dist > self.style["cluster_size"]:
                     # Number of intermediate points based on detail level
-                    num_points = int(detail_level * dist / self.style['cluster_size'])
+                    num_points = int(detail_level * dist / self.style["cluster_size"])
                     for j in range(num_points):
                         t = (j + 1) / (num_points + 1)
                         mid_x = p1[0] + t * (p2[0] - p1[0])
                         mid_y = p1[1] + t * (p2[1] - p1[1])
-                        offset = self.style['height_variance'] * sin(t * pi)
+                        offset = self.style["height_variance"] * sin(t * pi)
                         hull.append([mid_x + offset, mid_y - offset])
-        
+
         return hull
-```
 
-# output_preview.png
-
-This is a binary file of the type: Image
-
-# output.png
-
-This is a binary file of the type: Image
-
-# output.scad.log
-
-```log
-
-Processing features...
-
-Generating OpenSCAD code...
-
-Successfully created output.scad
-Style settings used:
-  merge_distance: 3.0
-  cluster_size: 3.0
-  height_variance: 0.2
-  detail_level: 0.3
-  artistic_style: classic
 ```
 
 # README.md
 
 ```md
-# Shadow City Generator - Artist's Guide
+# Shadow City Generator
 
-Create beautiful, 3D-printable city maps from OpenStreetMap data. This tool generates two separate files - a main city model and a decorative frame that can be printed separately and assembled.
+Create beautiful, 3D-printable city maps from OpenStreetMap data. This tool generates geometric interpretations of urban landscapes, complete with buildings, roads, and water features. The output includes a main city model and a decorative frame that can be printed separately and assembled.
 
 ## Quick Start
 
 \`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad [artistic options]
+python geojson_to_shadow_city.py input.geojson output.scad [options]
 \`\`\`
 
 This creates:
 - `output_main.scad` - The city model
 - `output_frame.scad` - A decorative frame that fits around the model
 
+### Basic Export Example
+
+\`\`\`bash
+# Generate both preview and STL files with modern style
+python geojson_to_shadow_city.py map.geojson output.scad \
+    --export both \
+    --style modern \
+    --size 200 \
+    --water-depth 3 \
+    --road-width 1
+\`\`\`
+
+## Export Options
+
+### Preview Generation
+\`\`\`bash
+# Generate preview images
+python geojson_to_shadow_city.py map.geojson output.scad \
+    --export preview \
+    --preview-size 1920 1080
+\`\`\`
+
+### STL Export
+\`\`\`bash
+# Generate high-quality STL files
+python geojson_to_shadow_city.py map.geojson output.scad \
+    --export stl \
+    --style classic
+\`\`\`
+
+Creates:
+- `output_main.stl` - Main city model
+- `output_frame.stl` - Decorative frame
+
+The STL files are generated using OpenSCAD's Manifold backend for optimal quality and performance.
+
 ## Preprocessing Options
 
-The Shadow City Generator includes preprocessing capabilities to help you refine your input data before generating the 3D model. This is particularly useful when working with large OpenStreetMap exports or when you want to focus on a specific area.
-
-### Basic Preprocessing
-\`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad --preprocess [options]
-\`\`\`
+The Shadow City Generator includes preprocessing capabilities to help you refine your input data before generating the 3D model.
 
 ### Distance-Based Cropping
 Crop features to a specific radius from the center point:
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-  --preprocess \
-  --crop-distance 1000  # Crop to 1000 meters from center
+    --preprocess \
+    --crop-distance 1000  # Crop to 1000 meters from center
 \`\`\`
 
 ### Bounding Box Cropping
 Crop features to a specific geographic area:
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-  --preprocess \
-  --crop-bbox 51.5074 -0.1278 51.5174 -0.1178  # south west north east
+    --preprocess \
+    --crop-bbox 51.5074 -0.1278 51.5174 -0.1178  # south west north east
 \`\`\`
 
 ## Artistic Options
@@ -1382,15 +1668,11 @@ Higher values add more intricate architectural details and smoother transitions 
 
 ### Building Features
 
-#### Shaping Your City's Style
-
-The Shadow City Generator gives you powerful creative control over how buildings appear in your model. You can create everything from precise architectural reproductions to artistic interpretations of urban spaces.
-
 #### Building Size Selection
 \`\`\`bash
 --min-building-area 600
 \`\`\`
-Think of this like adjusting the level of detail in your city:
+Controls which buildings are included:
 - Low values (200-400): Include small buildings like houses and shops
 - Medium values (600-800): Focus on medium-sized structures
 - High values (1000+): Show only larger buildings like offices and apartments
@@ -1399,25 +1681,19 @@ Think of this like adjusting the level of detail in your city:
 \`\`\`bash
 --merge-distance 2.0
 \`\`\`
-This is where the real artistic magic happens. This setting determines how buildings flow together:
-- `--merge-distance 0`: Each building stands alone - perfect for architectural studies or precise city representations
-- `--merge-distance 1-2`: Nearby buildings gently blend together, creating small architectural groupings
-- `--merge-distance 3-5`: Buildings flow into each other more dramatically, forming artistic interpretations of city blocks
-- `--merge-distance 6+`: Creates bold, abstract representations where buildings merge into sculptural forms
-
-Think of it like adjusting the "softness" of your city's appearance:
-- Sharp and distinct: Use 0
-- Gentle grouping: Use 1-2
-- Flowing forms: Use 3-5
-- Abstract sculpture: Use 6+
+Controls how buildings are combined:
+- `0`: Each building stands alone
+- `1-2`: Nearby buildings gently blend together
+- `3-5`: Buildings flow into each other more dramatically
+- `6+`: Creates bold, abstract representations
 
 #### Height Artistry
 \`\`\`bash
 --height-variance 0.2
 \`\`\`
-This adds personality to your buildings' heights:
-- `0.0`: All buildings in a group stay the same height
-- `0.1-0.2`: Subtle height variations for natural feel
+Controls building height variations:
+- `0.0`: Uniform heights within groups
+- `0.1-0.2`: Subtle height variations
 - `0.3-0.5`: More dramatic height differences
 - `0.6+`: Bold, artistic height variations
 
@@ -1431,210 +1707,115 @@ This adds personality to your buildings' heights:
 \`\`\`bash
 --cluster-size 3.0        # Size threshold for building clusters (default: 3.0)
 \`\`\`
-Controls how building clusters are formed when merging nearby structures.
 
 ## Creative Examples
 
-### Contemporary Downtown with Focused Area
+### Contemporary Downtown
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-  --preprocess \
-  --crop-distance 800 \
-  --style modern \
-  --detail 0.5 \
-  --merge-distance 0 \
-  --min-building-area 1000 \
-  --road-width 1.5
+    --preprocess \
+    --crop-distance 800 \
+    --style modern \
+    --detail 0.5 \
+    --merge-distance 0 \
+    --min-building-area 1000 \
+    --road-width 1.5 \
+    --export both
 \`\`\`
-Creates a sleek, modern cityscape focusing on an 800-meter radius from the center.
 
-### Historic District Section
+### Historic District
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-  --preprocess \
-  --crop-bbox 51.5074 -0.1278 51.5174 -0.1178 \
-  --style classic \
-  --detail 1.5 \
-  --merge-distance 3 \
-  --min-building-area 400 \
-  --height-variance 0.3
+    --style classic \
+    --detail 1.5 \
+    --merge-distance 3 \
+    --min-building-area 400 \
+    --height-variance 0.3 \
+    --export stl
 \`\`\`
-Produces an organic feel with clustered buildings and traditional architectural details within a specific area.
 
 ### Minimalist Urban Plan
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-  --style minimal \
-  --detail 0.3 \
-  --merge-distance 0 \
-  --road-width 1.5 \
-  --water-depth 2
-\`\`\`
-Creates a stark, minimalist view emphasizing urban layout and form.
-
-## Printing Guide
-
-1. Print the main model (`output_main.scad`) and frame (`output_frame.scad`) separately
-2. The frame has a 5mm border and will be slightly larger than the main model
-3. Suggested print settings:
-   - Layer height: 0.2mm for good detail
-   - Consider different colors for frame and city
-   - Frame often looks best in white or a contrasting color
-
-## Workflow Tips
-
-### For Large City Areas
-1. Export your area from OpenStreetMap using Overpass Turbo
-2. Use preprocessing to focus on your area of interest:
-   \`\`\`bash
-   python geojson_to_shadow_city.py input.geojson output.scad \
-     --preprocess --crop-distance 1000
-   \`\`\`
-3. Adjust artistic settings and preview in OpenSCAD
-4. Iterate until you achieve the desired look
-5. Slice and print
-
-### For Specific Districts
-1. Export a larger area from OpenStreetMap
-2. Use bounding box preprocessing to isolate your district:
-   \`\`\`bash
-   python geojson_to_shadow_city.py input.geojson output.scad \
-     --preprocess --crop-bbox SOUTH WEST NORTH EAST
-   \`\`\`
-3. Fine-tune artistic settings
-4. Preview and adjust as needed
-5. Slice and print
-
-## Artistic Adjustments
-
-### For a Cleaner Look
-- Increase `--min-building-area`
-- Decrease `--detail`
-- Use `--style minimal`
-- Set `--merge-distance` to 0
-
-### For a More Artistic Interpretation
-- Increase `--merge-distance`
-- Increase `--height-variance`
-- Use `--style classic`
-- Increase `--detail`
-
-### For Emphasizing Urban Features
-- Adjust `--road-width` to highlight street patterns
-- Increase `--water-depth` to emphasize waterways
-- Lower `--min-building-area` to include more architectural detail
-
-### For a Simplified View
-- Use `--style minimal`
-- Set `--detail` to 0.3 or lower
-- Increase `--min-building-area`
-- Set `--merge-distance` to 0
-
-## Preview and OpenSCAD Integration
-
-The Shadow City Generator now includes features to streamline your workflow with OpenSCAD integration and preview generation.
-
-### Quick Preview
-Generate a PNG preview of your model without opening OpenSCAD:
-\`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad --preview
+    --style minimal \
+    --detail 0.3 \
+    --merge-distance 0 \
+    --road-width 1.5 \
+    --water-depth 2 \
+    --export both
 \`\`\`
 
-Customize preview size:
-\`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad --preview --preview-size 1024 768
-\`\`\`
-
-### Auto-Reload Integration
-Watch for changes and automatically reload in OpenSCAD:
-\`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad --watch
-\`\`\`
-
-### Combined Workflow
-Generate preview and enable auto-reload:
-\`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad --preview --watch
-\`\`\`
-
-### Installation Requirements
+## Installation
 
 1. Install Python dependencies:
 \`\`\`bash
 pip install -r requirements.txt
 \`\`\`
 
-2. Platform-specific requirements:
+2. Install OpenSCAD:
+   - Windows: Download from openscad.org
+   - macOS: `brew install openscad`
+   - Linux: `sudo apt install openscad` or equivalent
 
-#### Windows
-No additional requirements (uses pywin32, installed via requirements.txt)
+## 3D Printing Guide
 
-#### Linux
-Install xdotool for auto-reload functionality:
-\`\`\`bash
-sudo apt-get install xdotool  # Ubuntu/Debian
-sudo dnf install xdotool      # Fedora
-sudo pacman -S xdotool        # Arch Linux
-\`\`\`
+### Print Settings
+1. **Layer Height**: 
+   - 0.2mm for good detail
+   - 0.12mm for extra detail in complex areas
 
-#### macOS
-No additional requirements (uses built-in osascript)
+2. **Infill**:
+   - Main model: 10-15%
+   - Frame: 20% for stability
 
-### Custom OpenSCAD Path
-If OpenSCAD isn't found automatically, specify its path:
-\`\`\`bash
-python geojson_to_shadow_city.py input.geojson output.scad --openscad-path "/path/to/openscad"
-\`\`\`
+3. **Support Settings**:
+   - Main model: Support on build plate only
+   - Frame: Usually no supports needed
 
-### Workflow Tips
+4. **Material Choice**:
+   - PLA works well for both parts
+   - Consider using contrasting colors for main model and frame
 
-1. **Development Workflow**
-   \`\`\`bash
-   python geojson_to_shadow_city.py input.geojson output.scad --watch
-   \`\`\`
-   - Make changes to parameters
-   - See updates automatically in OpenSCAD
-   - Press Ctrl+C when done
+### Assembly Tips
+1. Print the main model (`*_main.stl`) and frame (`*_frame.stl`) separately
+2. The frame has a 5mm border and will be slightly larger than the main model
+3. Clean any support material carefully, especially from the frame
+4. The main model should fit snugly inside the frame
 
-2. **Quick Iterations**
-   \`\`\`bash
-   python geojson_to_shadow_city.py input.geojson output.scad --preview
-   \`\`\`
-   - Quickly preview changes without opening OpenSCAD
-   - Great for rapid parameter testing
+## Troubleshooting
 
-3. **Production Workflow**
-   \`\`\`bash
-   python geojson_to_shadow_city.py input.geojson output.scad --preview --preview-size 1920 1080
-   \`\`\`
-   - Generate high-resolution previews
-   - Perfect for documentation or sharing designs
-\`\`\`
+### Common Issues
 
-### 5. Installation Steps
+1. **Long Processing Times**:
+   - Reduce `--detail` level
+   - Increase `--min-building-area`
+   - Use `--crop-distance` to limit area
 
-1. Install the new Python requirements:
-\`\`\`bash
-pip install -r requirements.txt
-\`\`\`
+2. **Memory Issues**:
+   - Use `--preprocess` with smaller areas
+   - Increase `--min-building-area`
+   - Reduce `--detail` level
 
-2. Create the new `lib/preview.py` file with the content shown above
+3. **Preview/STL Generation**:
+   - Ensure OpenSCAD is properly installed
+   - Try using `--export preview` first to check the model
+   - Check available disk space
 
-3. Update `geojson_to_shadow_city.py` with the new content
+### Getting Help
 
-4. Update README.md with the new section
+If you encounter issues:
+1. Enable debug output with `--debug`
+2. Check the generated log file (`*.log`)
+3. Verify OpenSCAD installation
+4. Ensure all dependencies are installed
 
-5. Platform-specific setup:
-   - Windows: No additional steps needed
-   - Linux: Install xdotool using package manager
-   - macOS: No additional steps needed
+## Contributing
 
-The integration now provides:
-- Automatic preview generation
-- Auto-reload functionality
-- Cross-platform support
-- High-resolution preview options
-- Streamlined development workflow
+Contributions are welcome! Please feel free to submit pull requests or create issues for bugs and feature requests.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 ```
 
 # requirements.txt

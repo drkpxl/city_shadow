@@ -61,8 +61,14 @@ class FeatureProcessor:
                     f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²"
                 )
 
-        # Handle roads
+        # Handle roads (excluding tunnels)
         elif "highway" in props:
+            # Skip if it's a tunnel
+            if props.get("tunnel") in ["yes", "true", "1"]:
+                if self.debug:
+                    print(f"Skipping tunnel road of type '{props.get('highway')}'")
+                return
+
             transformed = [transform(lon, lat) for lon, lat in coords]
             if len(transformed) >= 2:  # Ensure we have enough points for a road
                 road_type = props.get("highway", "unknown")
@@ -88,8 +94,14 @@ class FeatureProcessor:
                 if self.debug:
                     print(f"Added parking area with {len(transformed)} points")
 
-        # Handle railways
+        # Handle railways (excluding tunnels)
         elif "railway" in props:
+            # Skip if it's a tunnel
+            if props.get("tunnel") in ["yes", "true", "1"]:
+                if self.debug:
+                    print(f"Skipping tunnel railway of type '{props.get('railway')}'")
+                return
+
             transformed = [transform(lon, lat) for lon, lat in coords]
             if len(transformed) >= 2:  # Ensure we have enough points
                 features["railways"].append(

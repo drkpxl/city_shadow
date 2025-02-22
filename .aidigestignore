@@ -3,3 +3,4 @@ output.scad
 *.scad
 SL_export_clipped.geojson
 *.stl
+Regions/
