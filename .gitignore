@@ -1,3 +1,4 @@
 codebase.md
 .aidigestignore
 *.log
+node_modules/
