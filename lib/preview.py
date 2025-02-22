@@ -2,15 +2,15 @@ import subprocess
 import os
 import sys
 import tempfile
-from PIL import Image, ImageEnhance
 import threading
 import time
+from PIL import Image, ImageEnhance
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 class OpenSCADIntegration:
     def __init__(self, openscad_path=None):
-        """Initialize OpenSCAD integration with optional path to OpenSCAD executable"""
+        """Initialize OpenSCAD integration with an optional path to the OpenSCAD executable."""
         self.openscad_path = openscad_path or self._find_openscad()
         if not self.openscad_path:
             raise RuntimeError("Could not find OpenSCAD executable")
@@ -21,7 +21,7 @@ class OpenSCADIntegration:
         self.running = False
 
     def _find_openscad(self):
-        """Find OpenSCAD executable based on platform"""
+        """Find the OpenSCAD executable based on the current platform."""
         if sys.platform == "win32":
             possible_paths = [
                 r"C:\Program Files\OpenSCAD\openscad.exe",
@@ -45,103 +45,65 @@ class OpenSCADIntegration:
                 pass
         return None
 
-    def generate_preview(self, scad_file, output_image, size=(1920, 1080)):
-        """Generate a PNG preview of the SCAD file"""
-        if not self.openscad_path:
-            raise RuntimeError("OpenSCAD not found")
+    def generate_preview(self, output_file, output_image, size=(1920, 1080)):
+        """
+        Generate a PNG preview of the main SCAD file (output_main.scad) using a shell command.
+        
+        This method assumes that the conversion process produces two SCAD files:
+          - output_main.scad (the main 3D model)
+          - output_frame.scad (the decorative frame)
+          
+        It derives the main file by replacing '.scad' with '_main.scad' in the provided output_file.
+        """
+        # Derive the main SCAD file from the provided output file.
+        main_scad_file = output_file.replace('.scad', '_main.scad')
+        main_scad_file = os.path.abspath(main_scad_file)
+        output_image = os.path.abspath(output_image)
+        print("SCAD file path:", main_scad_file)
+        print("Output image path:", output_image)
 
-        # Create a temporary file for the preview script
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.scad', delete=False) as temp:
-            # Read original content
-            with open(scad_file, 'r') as original:
-                content = original.read()
-            
-            # Add preview settings to the content with exact camera values
-            preview_content = f"""
-// Preview configuration with exact camera settings
-$vpr = [55, 0, 25];    // Camera rotation
-$vpt = [0, 0, 0];      // Camera translation
-$vpd = 140;            // Camera distance
-$vpf = 22.5;           // Field of view
+        # Set environment variable explicitly
+        env = os.environ.copy()
+        env["OPENSCAD_HEADLESS"] = "1"
 
-{content}
-"""
-            temp.write(preview_content)
-            temp_path = temp.name
+        # Build the command (adjust the image size if needed)
+        command = [
+            self.openscad_path,
+            '--preview=throwntogether',
+            '--imgsize', f'{size[0]},{size[1]}',
+            '--autocenter',
+            '--colorscheme=Nature',
+            '-o', output_image,
+            main_scad_file
+        ]
 
+        print("Running command:", " ".join(command))
         try:
-            print("Generating preview image...")
-            
-            # Create process with settings
-            process = subprocess.Popen([
-                self.openscad_path,
-                '-o', output_image,
-                '--imgsize', f'{size[0]},{size[1]}',
-                '--preview=throwntogether',
-                '--view=axes,edges,scales',
-                '--projection=perspective',
-                '--camera=0,0,0,30,0,25,140',  # Exact camera settings from output
-                '--colorscheme=Nature',
-                temp_path
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            try:
-                stdout, stderr = process.communicate(timeout=60)
-                
-                if stdout:
-                    print("OpenSCAD stdout:")
-                    print(stdout.decode())
-                    
-                if stderr:
-                    print("OpenSCAD stderr:")
-                    print(stderr.decode())
-                
-                # Check if file was created
-                if not os.path.exists(output_image):
-                    print("Error: Preview generation failed - no image created")
-                    return
-                
-                # Process the image
-                with Image.open(output_image) as img:
-                    img = img.convert('RGBA')
-                    
-                    # Basic enhancements
-                    enhancer = ImageEnhance.Contrast(img)
-                    img = enhancer.enhance(1.2)
-                    
-                    enhancer = ImageEnhance.Sharpness(img)
-                    img = enhancer.enhance(1.3)
-                    
-                    # Save with optimization
-                    img.save(output_image, 'PNG', optimize=True, quality=95)
-                    
-                print(f"Preview generated: {output_image}")
-                
-            except subprocess.TimeoutExpired:
-                print("Preview generation timed out, terminating process...")
-                process.kill()
-                process.communicate()
-                print("Process terminated")
-                
-        except Exception as e:
-            print(f"Error during preview generation: {e}")
-                
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
+            result = subprocess.run(
+                command,
+                env=env,
+                cwd=os.path.dirname(main_scad_file),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            print("Subprocess stdout:", result.stdout)
+            print("Subprocess stderr:", result.stderr)
+            print(f"Preview image generated: {output_image}")
+        except subprocess.CalledProcessError as e:
+            print("Error generating preview:", e)
+            print("Subprocess stdout:", e.stdout)
+            print("Subprocess stderr:", e.stderr)
 
     def watch_and_reload(self, scad_file):
-        """Watch the SCAD file and reload it in OpenSCAD when it changes"""
+        """Watch the SCAD file and trigger a reload in OpenSCAD when it changes."""
         if not self.openscad_path:
             raise RuntimeError("OpenSCAD not found")
 
-        # First, open the file in OpenSCAD
+        # First, open the file in OpenSCAD.
         subprocess.Popen([self.openscad_path, scad_file])
 
-        # Set up file watching
+        # Set up file watching.
         class SCDHandler(FileSystemEventHandler):
             def __init__(self, scad_path):
                 self.scad_path = scad_path
@@ -174,7 +136,7 @@ $vpf = 22.5;           // Field of view
                                 print("Warning: xdotool not found. Auto-reload may not work on Linux.")
                         self.last_reload = current_time
 
-        # Start watching the file
+        # Start watching the file.
         self.running = True
         event_handler = SCDHandler(os.path.abspath(scad_file))
         self.observer = Observer()
@@ -191,7 +153,7 @@ $vpf = 22.5;           // Field of view
         self.watch_thread.start()
 
     def stop_watching(self):
-        """Stop watching the SCAD file"""
+        """Stop watching the SCAD file."""
         if self.running:
             self.running = False
             if self.watch_thread:
