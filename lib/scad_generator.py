@@ -66,7 +66,6 @@ union() {{
         road_width = layer_specs['roads']['width']
         
         for i, road in enumerate(road_features):
-            # Ensure we have a list of coordinates regardless of type
             if isinstance(road, dict):
                 pts = road.get('coords', road)
                 if road.get('is_parking'):
@@ -171,3 +170,4 @@ union() {{
             return f'''
                 linear_extrude(height={height}, convexity=2)
                     polygon([{points_str}]);'''
+

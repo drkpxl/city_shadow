@@ -35,20 +35,26 @@ class EnhancedCityConverter:
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
             
-            # Generate OpenSCAD code
+            # Generate main model SCAD code
             self.print_debug("\nGenerating OpenSCAD code...")
-            scad_code = self.scad_generator.generate_openscad(
+            main_scad = self.scad_generator.generate_openscad(
                 features, 
                 self.size, 
                 self.layer_specs
             )
             
+            # Generate frame SCAD code using the helper method
+            frame_scad = self._generate_frame(self.size, self.max_height)
+            
+            # Combine main model and frame in a union block
+            final_scad = f"union() {{\n{main_scad}\n{frame_scad}\n}}"
+            
             # Write output
             with open(output_file, 'w') as f:
-                f.write(scad_code)
+                f.write(final_scad)
             
             self.print_debug(f"\nSuccessfully created {output_file}")
-            self.print_debug(f"Style settings used:")
+            self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
             
@@ -62,3 +68,21 @@ class EnhancedCityConverter:
         except Exception as e:
             print(f"Error: {str(e)}")
             raise
+
+    def _generate_frame(self, size, height):
+        """
+        Generate a frame around the entire [0,0] to [size,size] area.
+        The data is already inset 5mm on each side, so the 'inner' region is [5,5] → [size-5,size-5].
+        We make a difference of two cubes to produce a 5mm frame.
+        """
+        return f"""
+    // Frame around the model
+    difference() {{
+        // Outer block: [0,0,0] to [size, size, height]
+        cube([{size}, {size}, {height}]);
+        // Subtract the inner region: shift by [5,5], then [size-10, size-10] wide
+        translate([5, 5, 0])
+            cube([{size-10}, {size-10}, {height}]);
+    }}
+    """
+

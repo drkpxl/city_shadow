@@ -1,9 +1,11 @@
+# lib/style_manager.py
 from math import log10, sin, cos, pi, atan2
 from .geometry import GeometryUtils
 
 class StyleManager:
     def __init__(self, style_settings=None):
-        self.border_width = 0
+        # CHANGED: we now use 5 mm to create an inset around the data
+        self.border_width = 5
         self.base_height = 10
         self.geometry = GeometryUtils()
         
@@ -14,7 +16,7 @@ class StyleManager:
             'height_variance': 0.2,
             'detail_level': 1.0,
             'artistic_style': 'modern',
-            'min_building_area': 600.0  # NEW: default minimum area in m²
+            'min_building_area': 600.0
         }
         
         # Override defaults with provided settings
@@ -74,6 +76,7 @@ class StyleManager:
         min_height = self.get_default_layer_specs()['buildings']['min_height']
         max_height = self.get_default_layer_specs()['buildings']['max_height']
         
+        from math import log10
         log_height = log10(height_m + 1)
         log_min = log10(1)
         log_max = log10(101)
@@ -146,12 +149,13 @@ class StyleManager:
         }
 
     def _add_artistic_variation(self, coords):
-        """Add variations to building coordinates based on artistic style"""
+        """Add variations to building coords based on style"""
         varied = []
         variance = self.style['height_variance']
         
         if self.style['artistic_style'] == 'modern':
             # Add angular variations
+            from math import sin, pi
             for i, coord in enumerate(coords):
                 x, y = coord
                 offset = variance * sin(i * pi / len(coords))
@@ -159,6 +163,7 @@ class StyleManager:
         
         elif self.style['artistic_style'] == 'classic':
             # Add curved variations
+            from math import sin, cos, pi
             for i, coord in enumerate(coords):
                 x, y = coord
                 angle = 2 * pi * i / len(coords)
@@ -176,6 +181,7 @@ class StyleManager:
         if len(points) < 3:
             return points
             
+        from math import atan2, pi, sin
         center = self.geometry.calculate_centroid(points)
         sorted_points = sorted(points, 
             key=lambda p: atan2(p[1] - center[1], p[0] - center[0]))

@@ -1,3 +1,4 @@
+# lib/feature_processor.py
 from .geometry import GeometryUtils
 
 class FeatureProcessor:
@@ -24,7 +25,7 @@ class FeatureProcessor:
         for feature in geojson_data['features']:
             self._process_single_feature(feature, features, transform)
         
-        # Apply building enhancements
+        # Apply building merging/clustering
         features['buildings'] = self.style_manager.merge_nearby_buildings(features['buildings'])
         
         return features
@@ -36,15 +37,13 @@ class FeatureProcessor:
         if not coords:
             return
             
-        # If this is a building, check its real-world area:
+        # If this is a building, check area:
         if 'building' in props:
             area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-            # Retrieve the minimum area threshold from style settings
             min_area = self.style_manager.style.get('min_building_area', 600.0)
             
             if area_m2 < min_area:
-                # Skip buildings smaller than the threshold
-                return
+                return  # skip small buildings
             
             # Otherwise, transform coordinates and store the building
             transformed = [transform(lon, lat) for lon, lat in coords]
@@ -53,7 +52,7 @@ class FeatureProcessor:
                 'coords': transformed,
                 'height': height
             })
-        # Handle parking features explicitly:
+        # Handle parking features explicitly
         elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
             transformed = [transform(lon, lat) for lon, lat in coords]
             features['roads'].append({

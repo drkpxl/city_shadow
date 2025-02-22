@@ -7,7 +7,6 @@
 # geojson_to_shadow_city.py
 
 ```py
-# geojson_to_shadow_city.py - Main entry point
 import argparse
 from lib.converter import EnhancedCityConverter
 
@@ -18,35 +17,40 @@ def main():
     parser.add_argument('input_json', help='Input GeoJSON file')
     parser.add_argument('output_scad', help='Output OpenSCAD file')
     parser.add_argument('--size', type=float, default=200,
-                      help='Size in mm (default: 200)')
+                        help='Size in mm (default: 200)')
     parser.add_argument('--height', type=float, default=20,
-                      help='Maximum height in mm (default: 20)')
+                        help='Maximum height in mm (default: 20)')
     parser.add_argument('--style', choices=['modern', 'classic', 'minimal'],
-                      default='modern', help='Artistic style')
+                        default='modern', help='Artistic style')
     parser.add_argument('--detail', type=float, default=1.0,
-                      help='Detail level 0-2 (default: 1.0)')
+                        help='Detail level 0-2 (default: 1.0)')
     parser.add_argument('--merge-distance', type=float, default=2.0,
-                      help='Distance threshold for merging buildings (default: 2.0)')
+                        help='Distance threshold for merging buildings (default: 2.0)')
     parser.add_argument('--cluster-size', type=float, default=3.0,
-                      help='Size threshold for building clusters (default: 3.0)')
+                        help='Size threshold for building clusters (default: 3.0)')
     parser.add_argument('--height-variance', type=float, default=0.2,
-                      help='Height variation 0-1 (default: 0.2)')
+                        help='Height variation 0-1 (default: 0.2)')
     parser.add_argument('--road-width', type=float, default=2.0,
-                      help='Width of roads in mm (default: 2.0)')
+                        help='Width of roads in mm (default: 2.0)')
     parser.add_argument('--water-depth', type=float, default=1.4,
-                      help='Depth of water features in mm (default: 1.4)')
+                        help='Depth of water features in mm (default: 1.4)')
     parser.add_argument('--debug', action='store_true',
-                      help='Enable debug output')
+                        help='Enable debug output')
     
+    # NEW: Minimum building area argument
+    parser.add_argument('--min-building-area', type=float, default=600.0,
+                        help='Minimum building footprint area in m^2 (default: 600)')
+
     args = parser.parse_args()
     
-    # Configure style settings
+    # Configure style settings including the minimum building area.
     style_settings = {
         'artistic_style': args.style,
         'detail_level': args.detail,
         'merge_distance': args.merge_distance,
         'cluster_size': args.cluster_size,
-        'height_variance': args.height_variance
+        'height_variance': args.height_variance,
+        'min_building_area': args.min_building_area  # NEW setting
     }
     
     converter = EnhancedCityConverter(
@@ -64,6 +68,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 ```
 
 # lib/__init__.py
@@ -144,7 +149,6 @@ class EnhancedCityConverter:
 # lib/feature_processor.py
 
 ```py
-# lib/feature_processor.py
 from .geometry import GeometryUtils
 
 class FeatureProcessor:
@@ -183,10 +187,18 @@ class FeatureProcessor:
         if not coords:
             return
             
-        transformed = [transform(lon, lat) for lon, lat in coords]
-        
-        # Categorize and process feature
+        # If this is a building, check its real-world area:
         if 'building' in props:
+            area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+            # Retrieve the minimum area threshold from style settings
+            min_area = self.style_manager.style.get('min_building_area', 600.0)
+            
+            if area_m2 < min_area:
+                # Skip buildings smaller than the threshold
+                return
+            
+            # Otherwise, transform coordinates and store the building
+            transformed = [transform(lon, lat) for lon, lat in coords]
             height = self.style_manager.scale_building_height(props)
             features['buildings'].append({
                 'coords': transformed,
@@ -194,18 +206,22 @@ class FeatureProcessor:
             })
         # Handle parking features explicitly:
         elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['roads'].append({
                 'coords': transformed,
                 'is_parking': True
             })
         elif 'highway' in props:
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['roads'].append({
                 'coords': transformed,
                 'is_parking': False
             })
         elif 'railway' in props:
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['railways'].append(transformed)
         elif 'natural' in props and props['natural'] == 'water':
+            transformed = [transform(lon, lat) for lon, lat in coords]
             features['water'].append(transformed)
 
 ```
@@ -213,8 +229,7 @@ class FeatureProcessor:
 # lib/geometry.py
 
 ```py
-# lib/geometry.py
-from math import sqrt, sin, cos, pi, atan2
+from math import sqrt, sin, cos, pi, atan2, radians
 
 class GeometryUtils:
     def create_coordinate_transformer(self, features, border_width, size):
@@ -271,7 +286,7 @@ class GeometryUtils:
         return sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
     def calculate_polygon_area(self, points):
-        """Calculate area of a polygon"""
+        """Calculate area of a polygon using the shoelace formula on transformed coordinates"""
         area = 0.0
         j = len(points) - 1
         for i in range(len(points)):
@@ -322,6 +337,38 @@ class GeometryUtils:
         polygon_points = left_side + list(reversed(right_side))
         return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in polygon_points)
 
+    def approximate_polygon_area_m2(self, coords):
+        """
+        Approximate the area of a lat/lon polygon in square meters
+        using a simple equirectangular projection and the shoelace formula.
+        """
+        if len(coords) < 3:
+            return 0.0
+        
+        # Calculate the center for projection
+        lons = [pt[0] for pt in coords]
+        lats = [pt[1] for pt in coords]
+        lon_center = sum(lons) / len(lons)
+        lat_center = sum(lats) / len(lats)
+        
+        R = 6371000.0  # Earth radius in meters
+        
+        # Convert each coordinate to x, y relative to the center
+        xy_points = []
+        for lon, lat in coords:
+            x = radians(lon - lon_center) * R * cos(radians(lat_center))
+            y = radians(lat - lat_center) * R
+            xy_points.append((x, y))
+        
+        # Calculate area using the shoelace formula
+        area = 0.0
+        n = len(xy_points)
+        for i in range(n):
+            j = (i + 1) % n
+            area += xy_points[i][0] * xy_points[j][1]
+            area -= xy_points[j][0] * xy_points[i][1]
+        
+        return abs(area) / 2.0
 
 ```
 
@@ -507,7 +554,6 @@ union() {{
 # lib/style_manager.py
 
 ```py
-# lib/style_manager.py
 from math import log10, sin, cos, pi, atan2
 from .geometry import GeometryUtils
 
@@ -523,7 +569,8 @@ class StyleManager:
             'cluster_size': 3.0,
             'height_variance': 0.2,
             'detail_level': 1.0,
-            'artistic_style': 'modern'
+            'artistic_style': 'modern',
+            'min_building_area': 600.0  # NEW: default minimum area in m²
         }
         
         # Override defaults with provided settings
@@ -712,6 +759,7 @@ class StyleManager:
                         hull.append([mid_x + offset, mid_y - offset])
         
         return hull
+
 ```
 
 # output.scad.log

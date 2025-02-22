@@ -1,3 +1,4 @@
+# lib/geometry.py
 from math import sqrt, sin, cos, pi, atan2, radians
 
 class GeometryUtils:
@@ -11,7 +12,7 @@ class GeometryUtils:
         if not all_coords:
             return lambda lon, lat: [size/2, size/2]
 
-        # Calculate bounds and create transformer
+        # Calculate bounds
         lons, lats = zip(*all_coords)
         min_lon, max_lon = min(lons), max(lons)
         min_lat, max_lat = min(lats), max(lats)
@@ -19,8 +20,8 @@ class GeometryUtils:
         available_size = size - 2 * border_width
         
         def transform(lon, lat):
-            x = (lon - min_lon) / (max_lon - min_lon)
-            y = (lat - min_lat) / (max_lat - min_lat)
+            x = (lon - min_lon) / (max_lon - min_lon) if (max_lon != min_lon) else 0.5
+            y = (lat - min_lat) / (max_lat - min_lat) if (max_lat != min_lat) else 0.5
             final_x = border_width + (x * available_size)
             final_y = border_width + (y * available_size)
             return [final_x, final_y]
@@ -55,7 +56,7 @@ class GeometryUtils:
         return sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
     def calculate_polygon_area(self, points):
-        """Calculate area of a polygon using the shoelace formula on transformed coordinates"""
+        """Calculate area using the shoelace formula on transformed coordinates"""
         area = 0.0
         j = len(points) - 1
         for i in range(len(points)):
@@ -67,10 +68,8 @@ class GeometryUtils:
         """Generate polygon points string for OpenSCAD"""
         if len(points) < 3:
             return None
-            
         if points[0] != points[-1]:
             points = points + [points[0]]
-            
         return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in points)
 
     def generate_buffered_polygon(self, points, width):
@@ -86,7 +85,6 @@ class GeometryUtils:
             dx = p2[0] - p1[0]
             dy = p2[1] - p1[1]
             length = sqrt(dx*dx + dy*dy)
-            
             if length < 0.001:
                 continue
                 
@@ -107,14 +105,11 @@ class GeometryUtils:
         return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in polygon_points)
 
     def approximate_polygon_area_m2(self, coords):
-        """
-        Approximate the area of a lat/lon polygon in square meters
-        using a simple equirectangular projection and the shoelace formula.
-        """
+        """Approximate the area of a lat/lon polygon in square meters"""
         if len(coords) < 3:
             return 0.0
         
-        # Calculate the center for projection
+        # Center for projection
         lons = [pt[0] for pt in coords]
         lats = [pt[1] for pt in coords]
         lon_center = sum(lons) / len(lons)
@@ -122,14 +117,14 @@ class GeometryUtils:
         
         R = 6371000.0  # Earth radius in meters
         
-        # Convert each coordinate to x, y relative to the center
+        # Convert each coordinate to x, y relative to center
         xy_points = []
         for lon, lat in coords:
             x = radians(lon - lon_center) * R * cos(radians(lat_center))
             y = radians(lat - lat_center) * R
             xy_points.append((x, y))
         
-        # Calculate area using the shoelace formula
+        # Shoelace formula
         area = 0.0
         n = len(xy_points)
         for i in range(n):

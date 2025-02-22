@@ -41,7 +41,7 @@ def main():
         'merge_distance': args.merge_distance,
         'cluster_size': args.cluster_size,
         'height_variance': args.height_variance,
-        'min_building_area': args.min_building_area  # NEW setting
+        'min_building_area': args.min_building_area
     }
     
     converter = EnhancedCityConverter(
