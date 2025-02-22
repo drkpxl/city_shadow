@@ -1,4 +1,11 @@
-# requirements.txt
+# Core requirements
 argparse>=1.4.0
 math>=3.8.0
 json>=2.0.9
+
+# Requirements for preview and integration
+Pillow>=9.0.0  # For image handling
+watchdog>=2.1.0  # For file watching
+# Platform-specific requirements (comment out what you don't need):
+pywin32>=228; sys_platform == 'win32'  # For Windows auto-reload
+# Note: Linux requires xdotool (install via package manager)

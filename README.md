@@ -208,3 +208,109 @@ Creates a stark, minimalist view emphasizing urban layout and form.
 - Set `--detail` to 0.3 or lower
 - Increase `--min-building-area`
 - Set `--merge-distance` to 0
+
+## Preview and OpenSCAD Integration
+
+The Shadow City Generator now includes features to streamline your workflow with OpenSCAD integration and preview generation.
+
+### Quick Preview
+Generate a PNG preview of your model without opening OpenSCAD:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad --preview
+```
+
+Customize preview size:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad --preview --preview-size 1024 768
+```
+
+### Auto-Reload Integration
+Watch for changes and automatically reload in OpenSCAD:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad --watch
+```
+
+### Combined Workflow
+Generate preview and enable auto-reload:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad --preview --watch
+```
+
+### Installation Requirements
+
+1. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Platform-specific requirements:
+
+#### Windows
+No additional requirements (uses pywin32, installed via requirements.txt)
+
+#### Linux
+Install xdotool for auto-reload functionality:
+```bash
+sudo apt-get install xdotool  # Ubuntu/Debian
+sudo dnf install xdotool      # Fedora
+sudo pacman -S xdotool        # Arch Linux
+```
+
+#### macOS
+No additional requirements (uses built-in osascript)
+
+### Custom OpenSCAD Path
+If OpenSCAD isn't found automatically, specify its path:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad --openscad-path "/path/to/openscad"
+```
+
+### Workflow Tips
+
+1. **Development Workflow**
+   ```bash
+   python geojson_to_shadow_city.py input.geojson output.scad --watch
+   ```
+   - Make changes to parameters
+   - See updates automatically in OpenSCAD
+   - Press Ctrl+C when done
+
+2. **Quick Iterations**
+   ```bash
+   python geojson_to_shadow_city.py input.geojson output.scad --preview
+   ```
+   - Quickly preview changes without opening OpenSCAD
+   - Great for rapid parameter testing
+
+3. **Production Workflow**
+   ```bash
+   python geojson_to_shadow_city.py input.geojson output.scad --preview --preview-size 1920 1080
+   ```
+   - Generate high-resolution previews
+   - Perfect for documentation or sharing designs
+```
+
+### 5. Installation Steps
+
+1. Install the new Python requirements:
+```bash
+pip install -r requirements.txt
+```
+
+2. Create the new `lib/preview.py` file with the content shown above
+
+3. Update `geojson_to_shadow_city.py` with the new content
+
+4. Update README.md with the new section
+
+5. Platform-specific setup:
+   - Windows: No additional steps needed
+   - Linux: Install xdotool using package manager
+   - macOS: No additional steps needed
+
+The integration now provides:
+- Automatic preview generation
+- Auto-reload functionality
+- Cross-platform support
+- High-resolution preview options
+- Streamlined development workflow
