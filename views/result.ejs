@@ -19,9 +19,17 @@
       <li class="list-group-item">
         <a href="<%= frameScad %>" download>Frame Model (SCAD)</a>
       </li>
-      <li class="list-group-item">
-        <a href="<%= logFile %>" download>Debug Log</a>
-      </li>
+      <% if (stlFiles && stlFiles.mainStl) { %>
+        <li class="list-group-item">
+          <a href="<%= stlFiles.mainStl %>" download>Main Model (STL)</a>
+        </li>
+        <li class="list-group-item">
+          <a href="<%= stlFiles.frameStl %>" download>Frame Model (STL)</a>
+        </li>
+        <% } %>
+          <li class="list-group-item">
+            <a href="<%= logFile %>" download>Debug Log</a>
+          </li>
     </ul>
     <hr>
     <h3>Process Output</h3>

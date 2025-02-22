@@ -262,10 +262,22 @@ app.post("/render", (req, res) => {
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
+    // New: include STL download links if export mode is "stl" or "both"
+    let stlFiles = {};
+    if (req.body.export === "stl" || req.body.export === "both") {
+      const mainStl = outputBase + "_main.stl";
+      const frameStl = outputBase + "_frame.stl";
+      stlFiles = {
+        mainStl: "/outputs/" + mainStl,
+        frameStl: "/outputs/" + frameStl,
+      };
+    }
+
     res.json({
       mainScad: "/outputs/" + mainScad,
       frameScad: "/outputs/" + frameScad,
       logFile: "/outputs/" + logFile,
+      stlFiles: stlFiles,
       stdout: stdoutData,
       stderr: stderrData,
     });
@@ -274,7 +286,6 @@ app.post("/render", (req, res) => {
 
 // Fallback /upload endpoint (if needed for non-AJAX uploads)
 app.post("/upload", upload.single("geojson"), (req, res) => {
-  // This endpoint remains unchanged for direct uploads
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
   }
