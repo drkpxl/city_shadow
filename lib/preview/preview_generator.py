@@ -48,11 +48,11 @@ class PreviewGenerator:
         command = [
             self.openscad_path,
             "--backend=Manifold",
-            "--preview=throwntogether",
+            "--render",
             "--imgsize",
             f"{size[0]},{size[1]}",
             "--autocenter",
-            "--colorscheme=Nature",
+            "--colorscheme=DeepOcean",
         ]
 
         if is_frame:

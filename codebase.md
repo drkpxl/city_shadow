@@ -438,11 +438,18 @@ class FeatureProcessor:
             "railways": [],
             "buildings": [],
             "bridges": [],
+            "industrial": [],  # New category for industrial areas
         }
 
-        # Loop through each GeoJSON feature and categorize
+        # First pass: Process everything except industrial landuse
         for feature in geojson_data["features"]:
-            self._process_single_feature(feature, features, transform)
+            if feature.get("properties", {}).get("landuse") != "industrial":
+                self._process_single_feature(feature, features, transform)
+
+        # Second pass: Process industrial landuse
+        for feature in geojson_data["features"]:
+            if feature.get("properties", {}).get("landuse") == "industrial":
+                self._process_industrial_area(feature, features, transform)
 
         # Store features in style manager before any merging
         self.style_manager.set_current_features(features)
@@ -450,11 +457,8 @@ class FeatureProcessor:
         # If debug is on, print counts
         if self.debug:
             print(f"\nProcessed feature counts:")
-            print(f"Water features: {len(features['water'])}")
-            print(f"Road features: {len(features['roads'])}")
-            print(f"Railway features: {len(features['railways'])}")
-            print(f"Building features: {len(features['buildings'])}")
-            print(f"Bridge features: {len(features['bridges'])}")
+            for category, items in features.items():
+                print(f"{category.capitalize()}: {len(items)}")
 
         # Build one combined geometry for roads, railways, and water
         barrier_union = self.create_barrier_union(
@@ -466,8 +470,9 @@ class FeatureProcessor:
         )
 
         # Merge buildings using the selected style
+        all_buildings = features["buildings"] + features["industrial"]
         features["buildings"] = self.style_manager.merge_nearby_buildings(
-            features["buildings"], barrier_union=barrier_union
+            all_buildings, barrier_union=barrier_union
         )
 
         return features
@@ -482,105 +487,175 @@ class FeatureProcessor:
         if not coords:
             return
 
-        # Buildings
+        # Industrial Buildings (specific handling)
+        if props.get("building") == "industrial":
+            self._process_industrial_building(props, coords, features, transform)
+            return
+
+        # Regular Buildings
         if "building" in props:
-            area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-            min_area = self.style_manager.style.get("min_building_area", 600.0)
-
-            if area_m2 < min_area:
-                if self.debug:
-                    print(f"Skipping small building with area {area_m2:.1f}m²")
-                return
-
-            # Transform coordinates
-            transformed = [transform(lon, lat) for lon, lat in coords]
-            height = self.style_manager.scale_building_height(props)
-            features["buildings"].append({"coords": transformed, "height": height})
-            if self.debug:
-                print(
-                    f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²"
-                )
+            self._process_building(props, coords, features, transform)
+            return
 
         # Roads / Bridges
-        elif "highway" in props:
-            # Skip tunnels
-            if props.get("tunnel") in ["yes", "true", "1"]:
-                if self.debug:
-                    print(f"Skipping tunnel road of type '{props.get('highway')}'")
-                return
-
-            transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) < 2:
-                return
-
-            if props.get("bridge") in ["yes", "true", "1"]:
-                # Mark as a bridge
-                bridge_type = props.get("highway", "bridge")
-                features["bridges"].append({"coords": transformed, "type": bridge_type})
-                if self.debug:
-                    print(
-                        f"Added bridge of type '{bridge_type}' with {len(transformed)} points"
-                    )
-            else:
-                # Normal road
-                road_type = props.get("highway", "unknown")
-                features["roads"].append(
-                    {"coords": transformed, "type": road_type, "is_parking": False}
-                )
-                if self.debug:
-                    print(
-                        f"Added road of type '{road_type}' with {len(transformed)} points"
-                    )
+        if "highway" in props:
+            self._process_road_or_bridge(props, coords, features, transform)
+            return
 
         # Parking areas
-        elif (
+        if self._is_parking_area(props):
+            self._process_parking(coords, features, transform)
+            return
+
+        # Railways
+        if "railway" in props and not props.get("tunnel") in ["yes", "true", "1"]:
+            self._process_railway(props, coords, features, transform)
+            return
+
+        # Water features
+        if props.get("natural") == "water":
+            self._process_water(props, coords, features, transform)
+            return
+
+    def _process_industrial_area(self, feature, features, transform):
+        """Process industrial landuse areas as potential buildings."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Transform coordinates
+        transformed = [transform(lon, lat) for lon, lat in coords]
+
+        # Use a minimum height for industrial areas
+        min_height = self.style_manager.get_default_layer_specs()["buildings"][
+            "min_height"
+        ]
+
+        # Check if this area should be treated as a building
+        if self.style_manager.style["artistic_style"] == "block-combine":
+            features["industrial"].append(
+                {"coords": transformed, "height": min_height, "is_industrial": True}
+            )
+            if self.debug:
+                print(f"Added industrial area with height {min_height}mm")
+
+    def _process_industrial_building(self, props, coords, features, transform):
+        """Process an industrial building with specific handling."""
+        area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+        min_area = self.style_manager.style.get("min_building_area", 600.0)
+
+        if area_m2 < min_area:
+            if self.debug:
+                print(f"Skipping small industrial building with area {area_m2:.1f}m²")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        height = self.style_manager.scale_building_height(props)
+
+        # Ensure minimum height for industrial buildings
+        min_height = self.style_manager.get_default_layer_specs()["buildings"][
+            "min_height"
+        ]
+        height = max(height, min_height)
+
+        features["industrial"].append(
+            {"coords": transformed, "height": height, "is_industrial": True}
+        )
+        if self.debug:
+            print(
+                f"Added industrial building with height {height:.1f}mm and area {area_m2:.1f}m²"
+            )
+
+    def _process_building(self, props, coords, features, transform):
+        """Process a regular building."""
+        area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+        min_area = self.style_manager.style.get("min_building_area", 600.0)
+
+        if area_m2 < min_area:
+            if self.debug:
+                print(f"Skipping small building with area {area_m2:.1f}m²")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        height = self.style_manager.scale_building_height(props)
+        features["buildings"].append({"coords": transformed, "height": height})
+        if self.debug:
+            print(f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²")
+
+    def _is_parking_area(self, props):
+        """Check if feature is a parking area."""
+        return (
             props.get("amenity") == "parking"
             or props.get("parking") == "surface"
             or props.get("service") == "parking_aisle"
-        ):
-            transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 3:  # polygon
-                features["roads"].append(
-                    {"coords": transformed, "type": "parking", "is_parking": True}
+        )
+
+    def _process_parking(self, coords, features, transform):
+        """Process a parking area."""
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) >= 3:  # polygon
+            features["roads"].append(
+                {"coords": transformed, "type": "parking", "is_parking": True}
+            )
+            if self.debug:
+                print(f"Added parking area with {len(transformed)} points")
+
+    def _process_road_or_bridge(self, props, coords, features, transform):
+        """Process a road or bridge feature."""
+        # Skip tunnels
+        if props.get("tunnel") in ["yes", "true", "1"]:
+            if self.debug:
+                print(f"Skipping tunnel road of type '{props.get('highway')}'")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
+            return
+
+        if props.get("bridge") in ["yes", "true", "1"]:
+            bridge_type = props.get("highway", "bridge")
+            features["bridges"].append({"coords": transformed, "type": bridge_type})
+            if self.debug:
+                print(
+                    f"Added bridge of type '{bridge_type}' with {len(transformed)} points"
                 )
-                if self.debug:
-                    print(f"Added parking area with {len(transformed)} points")
-
-        # Railways (excluding tunnels)
-        elif "railway" in props:
-            if props.get("tunnel") in ["yes", "true", "1"]:
-                if self.debug:
-                    print(f"Skipping tunnel railway of type '{props.get('railway')}'")
-                return
-
-            transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 2:
-                features["railways"].append(
-                    {"coords": transformed, "type": props.get("railway", "unknown")}
+        else:
+            road_type = props.get("highway", "unknown")
+            features["roads"].append(
+                {"coords": transformed, "type": road_type, "is_parking": False}
+            )
+            if self.debug:
+                print(
+                    f"Added road of type '{road_type}' with {len(transformed)} points"
                 )
-                if self.debug:
-                    print(
-                        f"Added railway '{props.get('railway', 'unknown')}' with {len(transformed)} points"
-                    )
 
-        # Water features
-        elif props.get("natural") == "water":
-            transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 3:
-                features["water"].append(
-                    {"coords": transformed, "type": props.get("water", "unknown")}
+    def _process_railway(self, props, coords, features, transform):
+        """Process a railway feature."""
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) >= 2:
+            features["railways"].append(
+                {"coords": transformed, "type": props.get("railway", "unknown")}
+            )
+            if self.debug:
+                print(
+                    f"Added railway '{props.get('railway', 'unknown')}' with {len(transformed)} points"
                 )
-                if self.debug:
-                    print(f"Added water feature with {len(transformed)} points")
 
-        # (Add more elif blocks for parks, forests, etc., if needed)
+    def _process_water(self, props, coords, features, transform):
+        """Process a water feature."""
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) >= 3:
+            features["water"].append(
+                {"coords": transformed, "type": props.get("water", "unknown")}
+            )
+            if self.debug:
+                print(f"Added water feature with {len(transformed)} points")
 
     def create_barrier_union(
         self, roads, railways, water, road_buffer=2.0, railway_buffer=2.0
     ):
-        """
-        Combine roads, railways, and water into one shapely geometry (unary_union).
-        """
+        """Combine roads, railways, and water into one shapely geometry."""
         barrier_geoms = []
 
         # Roads -> buffered lines
@@ -1555,11 +1630,11 @@ class PreviewGenerator:
         command = [
             self.openscad_path,
             "--backend=Manifold",
-            "--preview=throwntogether",
+            "--render",
             "--imgsize",
             f"{size[0]},{size[1]}",
             "--autocenter",
-            "--colorscheme=Nature",
+            "--colorscheme=DeepOcean",
         ]
 
         if is_frame:
@@ -1602,7 +1677,7 @@ difference() {{
         // Buildings
         {self._generate_building_features(features['buildings'], layer_specs)}
 
-        // Bridges (NEW)
+        // Bridges
         {self._generate_bridge_features(features['bridges'], layer_specs)}
     }}
 
@@ -1614,118 +1689,6 @@ difference() {{
     }}
 }}"""
         ]
-        return "\n".join(scad)
-
-    def _generate_water_features(self, water_features, layer_specs):
-        """Generate OpenSCAD code for water features (subtractive)"""
-        scad = []
-        base_height = layer_specs["base"]["height"]
-        water_depth = layer_specs["water"]["depth"]
-
-        for i, water in enumerate(water_features):
-            coords = water.get("coords", water)
-            points_str = self.geometry.generate_polygon_points(coords)
-            if points_str:
-                scad.append(
-                    f"""
-        // Water body {i+1}
-        translate([0, 0, {base_height - water_depth}])
-            linear_extrude(height={water_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);
-        """
-                )
-
-        return "\n".join(scad)
-
-    def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for roads (subtractive)"""
-        scad = []
-        base_height = layer_specs["base"]["height"]
-        road_depth = layer_specs["roads"]["depth"]
-        road_width = layer_specs["roads"]["width"]
-
-        # Debug prints
-        print(f"\nGenerating road features:")
-        print(f"Number of roads: {len(road_features)}")
-        print(f"Road depth: {road_depth}mm, width: {road_width}mm")
-
-        for i, road in enumerate(road_features):
-            coords = road.get("coords", [])
-            is_parking = road.get("is_parking", False)
-            if is_parking and len(coords) >= 3:
-                # Polygon
-                points_str = self.geometry.generate_polygon_points(coords)
-            else:
-                # Line-based (buffered polygon)
-                points_str = None
-                if len(coords) >= 2:
-                    points_str = self.geometry.generate_buffered_polygon(
-                        coords, road_width
-                    )
-
-            if points_str:
-                scad.append(
-                    f"""
-        // Road {i+1}
-        translate([0, 0, {base_height - road_depth}])
-            linear_extrude(height={road_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);
-        """
-                )
-
-        return "\n".join(scad)
-
-    def _generate_railway_features(self, railway_features, layer_specs):
-        """Generate OpenSCAD code for railways (subtractive)"""
-        scad = []
-        base_height = layer_specs["base"]["height"]
-        railway_depth = layer_specs["railways"]["depth"]
-        railway_width = layer_specs["railways"]["width"]
-
-        for i, railway in enumerate(railway_features):
-            coords = railway.get("coords", [])
-            if len(coords) < 2:
-                continue
-            points_str = self.geometry.generate_buffered_polygon(coords, railway_width)
-            if points_str:
-                scad.append(
-                    f"""
-        // Railway {i+1}
-        translate([0, 0, {base_height - railway_depth}])
-            linear_extrude(height={railway_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);
-        """
-                )
-
-        return "\n".join(scad)
-
-    def _generate_bridge_features(self, bridge_features, layer_specs):
-        """
-        Generate OpenSCAD code for bridges as
-        1 mm above the base, 1 mm thick, with road-like width.
-        """
-        scad = []
-        base_height = layer_specs["base"]["height"]
-        bridge_thickness = 1.0  # thickness
-        z_offset = base_height + 1.0  # place 1 mm above the top of the base
-        bridge_width = layer_specs["roads"]["width"]  # or define a custom width
-
-        for i, bridge in enumerate(bridge_features):
-            coords = bridge.get("coords", [])
-            if len(coords) < 2:
-                continue
-            points_str = self.geometry.generate_buffered_polygon(coords, bridge_width)
-            if points_str:
-                scad.append(
-                    f"""
-        // Bridge {i+1}
-        // Placed 1mm above base, 1mm thick
-        translate([0, 0, {z_offset}])
-            linear_extrude(height={bridge_thickness}, convexity=2)
-                polygon([{points_str}]);
-        """
-                )
-
         return "\n".join(scad)
 
     def _generate_building_features(self, building_features, layer_specs):
@@ -1740,14 +1703,22 @@ difference() {{
 
             building_height = building["height"]
             is_cluster = building.get("is_cluster", False)
+            is_industrial = building.get("is_industrial", False)
+
+            # Choose appropriate building type label for comments
+            building_type = (
+                "Industrial Building"
+                if is_industrial
+                else "Building Cluster" if is_cluster else "Building"
+            )
 
             details = self._generate_building_details(
-                points_str, building_height, is_cluster
+                points_str, building_height, is_cluster, is_industrial
             )
 
             scad.append(
                 f"""
-    // {"Building Cluster" if is_cluster else "Building"} {i+1}
+    // {building_type} {i+1}
     translate([0, 0, {base_height}]) {{
         {details}
     }}"""
@@ -1755,17 +1726,25 @@ difference() {{
 
         return "\n".join(scad)
 
-    def _generate_building_details(self, points_str, height, is_cluster):
-        """Generate architectural details based on style"""
+    def _generate_building_details(
+        self, points_str, height, is_cluster, is_industrial=False
+    ):
+        """Generate architectural details based on style and building type."""
         style = self.style_manager.style["artistic_style"]
         detail_level = self.style_manager.style["detail_level"]
 
-        # If it's a single building or minimal detail, extrude as-is
+        # Industrial buildings get special treatment
+        if is_industrial:
+            return self._generate_industrial_details(
+                points_str, height, style, detail_level
+            )
+
+        # Simple extrusion for low detail or single buildings
         if not is_cluster or detail_level < 0.5:
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
-        # Otherwise, add stylized top or sections
+        # Style-specific details for regular buildings
         if style == "modern":
             return f"""
     union() {{
@@ -1789,6 +1768,167 @@ difference() {{
         else:  # minimal
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
+
+    def _generate_industrial_details(self, points_str, height, style, detail_level):
+        """Generate industrial-specific architectural details."""
+        if style == "modern":
+            # Modern industrial: Flat roof with mechanical details
+            return f"""
+    union() {{
+        // Main structure
+        linear_extrude(height={height}, convexity=2)
+            polygon([{points_str}]);
+        
+        // Roof details (mechanical equipment, etc.)
+        translate([0, 0, {height}]) {{
+            linear_extrude(height=1.2, convexity=2)
+                offset(r=-2)
+                    polygon([{points_str}]);
+        }}
+    }}"""
+        elif style == "classic":
+            # Classic industrial: Sawtooth roof pattern
+            return f"""
+    union() {{
+        // Main structure
+        linear_extrude(height={height * 0.8}, convexity=2)
+            polygon([{points_str}]);
+        
+        // Sawtooth roof
+        translate([0, 0, {height * 0.8}])
+            linear_extrude(height={height * 0.2}, convexity=2)
+                offset(r=-1)
+                    polygon([{points_str}]);
+    }}"""
+        else:  # minimal
+            # Minimal industrial: Simple block with slight roof detail
+            return f"""
+    union() {{
+        // Main structure
+        linear_extrude(height={height}, convexity=2)
+            polygon([{points_str}]);
+        
+        // Simple roof edge
+        translate([0, 0, {height - 0.5}])
+            linear_extrude(height=0.5, convexity=2)
+                offset(r=-0.5)
+                    polygon([{points_str}]);
+    }}"""
+
+    def _generate_water_features(self, water_features, layer_specs):
+        """Generate OpenSCAD code for water features (subtractive)"""
+        scad = []
+        base_height = layer_specs["base"]["height"]
+        water_depth = layer_specs["water"]["depth"]
+
+        for i, water in enumerate(water_features):
+            coords = water.get("coords", water)
+            points_str = self.geometry.generate_polygon_points(coords)
+            if points_str:
+                scad.append(
+                    f"""
+        // Water body {i+1}
+        translate([0, 0, {base_height - water_depth}])
+            linear_extrude(height={water_depth + 0.1}, convexity=2)
+                polygon([{points_str}]);"""
+                )
+
+        return "\n".join(scad)
+
+    def _generate_road_features(self, road_features, layer_specs):
+        """Generate OpenSCAD code for roads (subtractive)"""
+        scad = []
+        base_height = layer_specs["base"]["height"]
+        road_depth = layer_specs["roads"]["depth"]
+        road_width = layer_specs["roads"]["width"]
+
+        for i, road in enumerate(road_features):
+            coords = road.get("coords", [])
+            is_parking = road.get("is_parking", False)
+
+            if is_parking and len(coords) >= 3:
+                # Parking lot as polygon
+                points_str = self.geometry.generate_polygon_points(coords)
+            else:
+                # Road as buffered line
+                points_str = None
+                if len(coords) >= 2:
+                    points_str = self.geometry.generate_buffered_polygon(
+                        coords, road_width
+                    )
+
+            if points_str:
+                scad.append(
+                    f"""
+        // {"Parking Area" if is_parking else "Road"} {i+1}
+        translate([0, 0, {base_height - road_depth}])
+            linear_extrude(height={road_depth + 0.1}, convexity=2)
+                polygon([{points_str}]);"""
+                )
+
+        return "\n".join(scad)
+
+    def _generate_railway_features(self, railway_features, layer_specs):
+        """Generate OpenSCAD code for railways (subtractive)"""
+        scad = []
+        base_height = layer_specs["base"]["height"]
+        railway_depth = layer_specs["railways"]["depth"]
+        railway_width = layer_specs["railways"]["width"]
+
+        for i, railway in enumerate(railway_features):
+            coords = railway.get("coords", [])
+            if len(coords) < 2:
+                continue
+
+            points_str = self.geometry.generate_buffered_polygon(coords, railway_width)
+            if points_str:
+                scad.append(
+                    f"""
+        // Railway {i+1}
+        translate([0, 0, {base_height - railway_depth}])
+            linear_extrude(height={railway_depth + 0.1}, convexity=2)
+                polygon([{points_str}]);"""
+                )
+
+        return "\n".join(scad)
+
+    def _generate_bridge_features(self, bridge_features, layer_specs):
+        """Generate OpenSCAD code for bridges with improved 3D printing support"""
+        scad = []
+        base_height = layer_specs["base"]["height"]
+        bridge_height = 3.0  # Height above base
+        bridge_thickness = 1.5  # Thickness for stability
+        support_width = 2.0  # Width of bridge supports
+        road_width = layer_specs["roads"]["width"]
+
+        for i, bridge in enumerate(bridge_features):
+            coords = bridge.get("coords", [])
+            if len(coords) < 2:
+                continue
+
+            points_str = self.geometry.generate_buffered_polygon(coords, road_width)
+            if points_str:
+                start_point = coords[0]
+                end_point = coords[-1]
+
+                scad.append(
+                    f"""
+        // Bridge {i+1}
+        union() {{
+            // Main bridge deck
+            translate([0, 0, {base_height + bridge_height}])
+                linear_extrude(height={bridge_thickness}, convexity=2)
+                    polygon([{points_str}]);
+            
+            // Bridge supports
+            translate([{start_point[0]}, {start_point[1]}, {base_height}])
+                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
+            translate([{end_point[0]}, {end_point[1]}, {base_height}])
+                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
+        }}"""
+                )
+
+        return "\n".join(scad)
 
 ```
 
@@ -2489,38 +2629,6 @@ class StyleManager:
 
 ```
 
-# outputs/output-1740237402466_preview_frame.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237402466_preview_main.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237446234_preview_frame.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237446234_preview_main.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237502382_preview_frame.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237502382_preview_main.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237510895_preview_frame.png
-
-This is a binary file of the type: Image
-
-# outputs/output-1740237510895_preview_main.png
-
-This is a binary file of the type: Image
-
 # package.json
 
 ```json
@@ -2837,6 +2945,15 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static("uploads"));
 app.use("/outputs", express.static("outputs"));
 
+// Parse URL-encoded bodies (for form submissions)
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// GET route for the index page
+app.get("/", (req, res) => {
+  res.render("index");
+});
+
 // Ensure uploads and outputs directories exist
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
@@ -2860,26 +2977,133 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// GET home page – upload form
-app.get("/", (req, res) => {
-  res.render("index");
+// Endpoint to handle AJAX file upload for live preview
+app.post("/uploadFile", upload.single("geojson"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded." });
+  }
+  // Return the absolute path for the Python tool
+  const filePath = path.join(__dirname, req.file.path);
+  res.json({ filePath: filePath });
 });
 
-// POST /upload – handle file upload and invoke the Python tool
-app.post("/upload", upload.single("geojson"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).send("No file uploaded.");
+// Endpoint to generate live previews based on current form options
+app.post("/preview", (req, res) => {
+  const uploadedFile = req.body.uploadedFile;
+  if (!uploadedFile) {
+    return res.status(400).json({ error: "No uploaded file provided." });
+  }
+  // Generate a unique base name for the preview outputs
+  const outputBase = "preview-" + Date.now() + "-" + uuidv4();
+  const outputScad = path.join(outputsDir, outputBase + ".scad");
+
+  // Build arguments for preview generation. We use --export preview.
+  let args = [
+    path.join(__dirname, "geojson_to_shadow_city.py"),
+    uploadedFile,
+    outputScad,
+    "--export",
+    "preview",
+  ];
+
+  // Add basic options if provided
+  if (req.body.size) args.push("--size", req.body.size);
+  if (req.body.height) args.push("--height", req.body.height);
+  if (req.body.style) args.push("--style", req.body.style);
+  if (req.body.detail) args.push("--detail", req.body.detail);
+  if (req.body["merge-distance"])
+    args.push("--merge-distance", req.body["merge-distance"]);
+  if (req.body["cluster-size"])
+    args.push("--cluster-size", req.body["cluster-size"]);
+  if (req.body["height-variance"])
+    args.push("--height-variance", req.body["height-variance"]);
+  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
+  if (req.body["water-depth"])
+    args.push("--water-depth", req.body["water-depth"]);
+  if (req.body["min-building-area"])
+    args.push("--min-building-area", req.body["min-building-area"]);
+  if (req.body.debug === "on") args.push("--debug");
+
+  // Preprocessing options
+  if (req.body.preprocess === "on") args.push("--preprocess");
+  if (req.body["crop-distance"])
+    args.push("--crop-distance", req.body["crop-distance"]);
+  if (
+    req.body.crop_bbox1 &&
+    req.body.crop_bbox2 &&
+    req.body.crop_bbox3 &&
+    req.body.crop_bbox4
+  ) {
+    args.push(
+      "--crop-bbox",
+      req.body.crop_bbox1,
+      req.body.crop_bbox2,
+      req.body.crop_bbox3,
+      req.body.crop_bbox4
+    );
   }
 
+  // Preview integration options
+  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
+    args.push(
+      "--preview-size",
+      req.body["preview-size-width"],
+      req.body["preview-size-height"]
+    );
+  }
+  if (req.body["preview-file"])
+    args.push("--preview-file", req.body["preview-file"]);
+  if (req.body.watch === "on") args.push("--watch");
+  if (req.body["openscad-path"])
+    args.push("--openscad-path", req.body["openscad-path"]);
+
+  console.log("Live preview generation command:", args.join(" "));
+
+  const pythonProcess = spawn("python3", args);
+  let stdoutData = "";
+  let stderrData = "";
+
+  pythonProcess.stdout.on("data", (data) => {
+    stdoutData += data.toString();
+  });
+  pythonProcess.stderr.on("data", (data) => {
+    stderrData += data.toString();
+  });
+  pythonProcess.on("close", (code) => {
+    if (code !== 0) {
+      console.error("Python preview process exited with code", code);
+      console.error(stderrData);
+      return res.status(500).json({ error: stderrData });
+    }
+    // Assume that the Python tool creates two preview images:
+    //  - [outputBase]_preview_main.png
+    //  - [outputBase]_preview_frame.png
+    const previewMain = outputBase + "_preview_main.png";
+    const previewFrame = outputBase + "_preview_frame.png";
+
+    res.json({
+      previewMain: "/outputs/" + previewMain,
+      previewFrame: "/outputs/" + previewFrame,
+      stdout: stdoutData,
+      stderr: stderrData,
+    });
+  });
+});
+
+// New endpoint for final model generation using the already-uploaded file
+app.post("/render", (req, res) => {
+  const uploadedFile = req.body.uploadedFile;
+  if (!uploadedFile) {
+    return res.status(400).json({ error: "No uploaded file provided." });
+  }
   // Generate a unique output base name (without extension)
-  const outputBase = "output-" + Date.now();
+  const outputBase = "output-" + Date.now() + "-" + uuidv4();
   const outputPath = path.join(outputsDir, outputBase + ".scad");
 
   // Build arguments for the Python tool:
-  // Basic required arguments: input and output file.
-  const args = [
+  let args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
-    path.join(__dirname, req.file.path),
+    uploadedFile,
     outputPath,
   ];
 
@@ -2905,7 +3129,6 @@ app.post("/upload", upload.single("geojson"), (req, res) => {
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-  // Expecting four separate fields for crop bbox
   if (
     req.body.crop_bbox1 &&
     req.body.crop_bbox2 &&
@@ -2941,42 +3164,33 @@ app.post("/upload", upload.single("geojson"), (req, res) => {
   if (req.body["openscad-path"])
     args.push("--openscad-path", req.body["openscad-path"]);
 
-  // Log the arguments for debugging
-  console.log("Running Python command with args:", args.join(" "));
+  console.log("Final render command:", args.join(" "));
 
-  // Spawn the Python process
   const pythonProcess = spawn("python3", args);
-
   let stdoutData = "";
   let stderrData = "";
 
   pythonProcess.stdout.on("data", (data) => {
     stdoutData += data.toString();
   });
-
   pythonProcess.stderr.on("data", (data) => {
     stderrData += data.toString();
   });
-
   pythonProcess.on("close", (code) => {
     if (code !== 0) {
-      console.error(`Python process exited with code ${code}`);
+      console.error("Python final render process exited with code", code);
       console.error(stderrData);
-      return res.status(500).send("Error processing file: " + stderrData);
+      return res.status(500).json({ error: stderrData });
     }
-
-    // Determine the names of the generated output files.
-    // For example, if outputPath is "outputs/output-123456789.scad",
-    // it will create:
-    //   - outputs/output-123456789_main.scad
-    //   - outputs/output-123456789_frame.scad
-    //   - outputs/output-123456789.scad.log
+    // Assume that the Python tool creates:
+    //  - [outputBase]_main.scad
+    //  - [outputBase]_frame.scad
+    //  - [outputBase].scad.log
     const mainScad = outputBase + "_main.scad";
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
-    // Render the result page with download links
-    res.render("result", {
+    res.json({
       mainScad: "/outputs/" + mainScad,
       frameScad: "/outputs/" + frameScad,
       logFile: "/outputs/" + logFile,
@@ -2984,6 +3198,15 @@ app.post("/upload", upload.single("geojson"), (req, res) => {
       stderr: stderrData,
     });
   });
+});
+
+// Fallback /upload endpoint (if needed for non-AJAX uploads)
+app.post("/upload", upload.single("geojson"), (req, res) => {
+  // This endpoint remains unchanged for direct uploads
+  if (!req.file) {
+    return res.status(400).send("No file uploaded.");
+  }
+  res.redirect("/");
 });
 
 app.listen(port, () => {
@@ -2997,166 +3220,326 @@ app.listen(port, () => {
 ```ejs
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <title>Shadow City Generator Frontend</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
+  <!-- Include jQuery for convenience -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+    .preview-container {
+      margin-top: 20px;
+    }
+
+    .preview-container img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+      padding: 5px;
+    }
+
+    .download-links a {
+      display: block;
+      margin-bottom: 5px;
+    }
+  </style>
 </head>
+
 <body>
   <div class="container">
     <h1 class="mt-5">Shadow City Generator</h1>
-    <p class="lead">Upload a GeoJSON file and set your options to generate a 3D-printable city model.</p>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-      
-      <!-- File Upload -->
-      <div class="form-group">
-        <label for="geojson">GeoJSON File</label>
-        <input type="file" class="form-control-file" id="geojson" name="geojson" required>
+    <p class="lead">Use the form to upload a GeoJSON file and set options. Live previews and downloadable outputs will
+      appear on the right.</p>
+
+    <!-- Hidden field to store uploaded file path -->
+    <input type="hidden" id="uploadedFile" name="uploadedFile" value="">
+
+    <div class="row">
+      <!-- Left Column: Form and Options -->
+      <div class="col-md-4">
+        <form id="optionsForm">
+          <!-- File Upload -->
+          <div class="form-group">
+            <label for="geojson">GeoJSON File</label>
+            <input type="file" class="form-control-file" id="geojson" name="geojson" required>
+          </div>
+
+          <!-- Basic Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Basic Options</legend>
+            <div class="form-group">
+              <label for="size">Model Size (mm)</label>
+              <input type="number" class="form-control live-preview" id="size" name="size" value="200" required>
+            </div>
+            <div class="form-group">
+              <label for="height">Maximum Height (mm)</label>
+              <input type="number" class="form-control live-preview" id="height" name="height" value="20" required>
+            </div>
+            <div class="form-group">
+              <label for="style">Artistic Style</label>
+              <select class="form-control live-preview" id="style" name="style">
+                <option value="modern" selected>Modern</option>
+                <option value="classic">Classic</option>
+                <option value="minimal">Minimal</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="detail">Detail Level (0-2)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="detail" name="detail" value="1.0"
+                required>
+            </div>
+            <div class="form-group">
+              <label for="merge-distance">Merge Distance</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="merge-distance"
+                name="merge-distance" value="2.0">
+            </div>
+            <div class="form-group">
+              <label for="cluster-size">Cluster Size</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="cluster-size" name="cluster-size"
+                value="3.0">
+            </div>
+            <div class="form-group">
+              <label for="height-variance">Height Variance</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="height-variance"
+                name="height-variance" value="0.2">
+            </div>
+            <div class="form-group">
+              <label for="road-width">Road Width (mm)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="road-width" name="road-width"
+                value="2.0">
+            </div>
+            <div class="form-group">
+              <label for="water-depth">Water Depth (mm)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="water-depth" name="water-depth"
+                value="1.4">
+            </div>
+            <div class="form-group">
+              <label for="min-building-area">Minimum Building Area (m²)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="min-building-area"
+                name="min-building-area" value="600.0">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="debug" name="debug">
+              <label class="form-check-label" for="debug">Enable Debug Output</label>
+            </div>
+          </fieldset>
+
+          <!-- Preprocessing Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preprocessing Options</legend>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
+              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            </div>
+            <div class="form-group">
+              <label for="crop-distance">Crop Distance (meters)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+            </div>
+            <div class="form-group">
+              <label>Crop Bounding Box (SOUTH, WEST, NORTH, EAST)</label>
+              <div class="form-row">
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="South"
+                    name="crop_bbox1">
+                </div>
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="West"
+                    name="crop_bbox2">
+                </div>
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="North"
+                    name="crop_bbox3">
+                </div>
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="East"
+                    name="crop_bbox4">
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Export Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Export Options</legend>
+            <div class="form-group">
+              <label for="export">Export Format</label>
+              <select class="form-control live-preview" id="export" name="export">
+                <option value="preview">Preview</option>
+                <option value="stl">STL</option>
+                <option value="both" selected>Both</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="output-stl">Output STL Filename</label>
+              <input type="text" class="form-control live-preview" id="output-stl" name="output-stl"
+                placeholder="Optional">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="no-repair" name="no-repair">
+              <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="force" name="force">
+              <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
+            </div>
+          </fieldset>
+
+          <!-- Preview &amp; Integration Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preview &amp; Integration Options</legend>
+            <div class="form-group">
+              <label>Preview Image Size (Width, Height in pixels)</label>
+              <div class="form-row">
+                <div class="col">
+                  <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
+                    value="1920">
+                </div>
+                <div class="col">
+                  <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
+                    value="1080">
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="preview-file">Preview Image Filename</label>
+              <input type="text" class="form-control live-preview" id="preview-file" name="preview-file"
+                placeholder="Optional">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="watch" name="watch">
+              <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
+            </div>
+            <div class="form-group">
+              <label for="openscad-path">OpenSCAD Executable Path</label>
+              <input type="text" class="form-control live-preview" id="openscad-path" name="openscad-path"
+                placeholder="Optional">
+            </div>
+          </fieldset>
+
+          <!-- Final Render Button -->
+          <button type="button" id="renderBtn" class="btn btn-success mb-3">Render Final Model</button>
+        </form>
       </div>
 
-      <!-- Basic Options -->
-      <fieldset class="border p-3 mb-3">
-        <legend class="w-auto">Basic Options</legend>
-        <div class="form-group">
-          <label for="size">Model Size (mm)</label>
-          <input type="number" class="form-control" id="size" name="size" value="200" required>
+      <!-- Right Column: Live Previews and Downloadable Files -->
+      <div class="col-md-8">
+        <div class="preview-container">
+          <h3>Live Preview - Main Model</h3>
+          <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
         </div>
-        <div class="form-group">
-          <label for="height">Maximum Height (mm)</label>
-          <input type="number" class="form-control" id="height" name="height" value="20" required>
+        <div class="preview-container">
+          <h3>Live Preview - Frame Model</h3>
+          <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
-        <div class="form-group">
-          <label for="style">Artistic Style</label>
-          <select class="form-control" id="style" name="style">
-            <option value="modern" selected>Modern</option>
-            <option value="classic">Classic</option>
-            <option value="minimal">Minimal</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="detail">Detail Level (0-2)</label>
-          <input type="number" step="0.1" class="form-control" id="detail" name="detail" value="1.0" required>
-        </div>
-        <div class="form-group">
-          <label for="merge-distance">Merge Distance</label>
-          <input type="number" step="0.1" class="form-control" id="merge-distance" name="merge-distance" value="2.0">
-        </div>
-        <div class="form-group">
-          <label for="cluster-size">Cluster Size</label>
-          <input type="number" step="0.1" class="form-control" id="cluster-size" name="cluster-size" value="3.0">
-        </div>
-        <div class="form-group">
-          <label for="height-variance">Height Variance</label>
-          <input type="number" step="0.1" class="form-control" id="height-variance" name="height-variance" value="0.2">
-        </div>
-        <div class="form-group">
-          <label for="road-width">Road Width (mm)</label>
-          <input type="number" step="0.1" class="form-control" id="road-width" name="road-width" value="2.0">
-        </div>
-        <div class="form-group">
-          <label for="water-depth">Water Depth (mm)</label>
-          <input type="number" step="0.1" class="form-control" id="water-depth" name="water-depth" value="1.4">
-        </div>
-        <div class="form-group">
-          <label for="min-building-area">Minimum Building Area (m²)</label>
-          <input type="number" step="0.1" class="form-control" id="min-building-area" name="min-building-area" value="600.0">
-        </div>
-        <div class="form-group form-check">
-          <input type="checkbox" class="form-check-input" id="debug" name="debug">
-          <label class="form-check-label" for="debug">Enable Debug Output</label>
-        </div>
-      </fieldset>
-
-      <!-- Preprocessing Options -->
-      <fieldset class="border p-3 mb-3">
-        <legend class="w-auto">Preprocessing Options</legend>
-        <div class="form-group form-check">
-          <input type="checkbox" class="form-check-input" id="preprocess" name="preprocess">
-          <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
-        </div>
-        <div class="form-group">
-          <label for="crop-distance">Crop Distance (meters)</label>
-          <input type="number" step="0.1" class="form-control" id="crop-distance" name="crop-distance">
-        </div>
-        <div class="form-group">
-          <label>Crop Bounding Box (SOUTH, WEST, NORTH, EAST)</label>
-          <div class="form-row">
-            <div class="col">
-              <input type="number" step="0.0001" class="form-control" placeholder="South" name="crop_bbox1">
-            </div>
-            <div class="col">
-              <input type="number" step="0.0001" class="form-control" placeholder="West" name="crop_bbox2">
-            </div>
-            <div class="col">
-              <input type="number" step="0.0001" class="form-control" placeholder="North" name="crop_bbox3">
-            </div>
-            <div class="col">
-              <input type="number" step="0.0001" class="form-control" placeholder="East" name="crop_bbox4">
-            </div>
+        <div class="download-links mt-4">
+          <h4>Download Rendered Files</h4>
+          <div id="downloadLinks">
+            <!-- Links will be inserted here after final render -->
           </div>
         </div>
-      </fieldset>
+      </div>
+    </div> <!-- end row -->
+  </div> <!-- end container -->
 
-      <!-- Export Options -->
-      <fieldset class="border p-3 mb-3">
-        <legend class="w-auto">Export Options</legend>
-        <div class="form-group">
-          <label for="export">Export Format</label>
-          <select class="form-control" id="export" name="export">
-            <option value="preview">Preview</option>
-            <option value="stl">STL</option>
-            <option value="both" selected>Both</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="output-stl">Output STL Filename</label>
-          <input type="text" class="form-control" id="output-stl" name="output-stl" placeholder="Optional">
-        </div>
-        <div class="form-group form-check">
-          <input type="checkbox" class="form-check-input" id="no-repair" name="no-repair">
-          <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
-        </div>
-        <div class="form-group form-check">
-          <input type="checkbox" class="form-check-input" id="force" name="force">
-          <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
-        </div>
-      </fieldset>
+  <script>
+    // Function to update the live preview images
+    function updatePreview() {
+      var uploadedFile = $("#uploadedFile").val();
+      if (!uploadedFile) {
+        console.log("No file uploaded yet.");
+        return;
+      }
+      // Gather all form data
+      var formData = $("#optionsForm").serializeArray();
+      formData.push({ name: "uploadedFile", value: uploadedFile });
 
-      <!-- Preview and Integration Options -->
-      <fieldset class="border p-3 mb-3">
-        <legend class="w-auto">Preview &amp; Integration Options</legend>
-        <div class="form-group">
-          <label>Preview Image Size (Width, Height in pixels)</label>
-          <div class="form-row">
-            <div class="col">
-              <input type="number" class="form-control" placeholder="Width" name="preview-size-width" value="1920">
-            </div>
-            <div class="col">
-              <input type="number" class="form-control" placeholder="Height" name="preview-size-height" value="1080">
-            </div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label for="preview-file">Preview Image Filename</label>
-          <input type="text" class="form-control" id="preview-file" name="preview-file" placeholder="Optional">
-        </div>
-        <div class="form-group form-check">
-          <input type="checkbox" class="form-check-input" id="watch" name="watch">
-          <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
-        </div>
-        <div class="form-group">
-          <label for="openscad-path">OpenSCAD Executable Path</label>
-          <input type="text" class="form-control" id="openscad-path" name="openscad-path" placeholder="Optional">
-        </div>
-      </fieldset>
+      $.ajax({
+        url: "/preview",
+        type: "POST",
+        data: formData,
+        success: function (data) {
+          if (data.previewMain && data.previewFrame) {
+            $("#previewMain").attr("src", data.previewMain).show();
+            $("#previewFrame").attr("src", data.previewFrame).show();
+          }
+        },
+        error: function (err) {
+          console.error("Preview update error:", err);
+        }
+      });
+    }
 
-      <button type="submit" class="btn btn-primary">Generate Model</button>
-    </form>
-  </div>
+    // Upload GeoJSON file via AJAX when the file input changes
+    $("#geojson").on("change", function () {
+      var fileInput = document.getElementById("geojson");
+      if (fileInput.files.length === 0) return;
+
+      var formData = new FormData();
+      formData.append("geojson", fileInput.files[0]);
+
+      $.ajax({
+        url: "/uploadFile",
+        type: "POST",
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function (data) {
+          if (data.filePath) {
+            $("#uploadedFile").val(data.filePath);
+            updatePreview();
+          }
+        },
+        error: function (err) {
+          console.error("File upload error:", err);
+        }
+      });
+    });
+
+    // Update live preview when any option changes
+    $(".live-preview").on("change keyup", function () {
+      updatePreview();
+    });
+
+    // Handle final render button click
+    $("#renderBtn").on("click", function () {
+      var uploadedFile = $("#uploadedFile").val();
+      if (!uploadedFile) {
+        alert("Please upload a GeoJSON file first.");
+        return;
+      }
+      // Gather form data for final render
+      var formData = $("#optionsForm").serializeArray();
+      formData.push({ name: "uploadedFile", value: uploadedFile });
+
+      $.ajax({
+        url: "/render",
+        type: "POST",
+        data: formData,
+        success: function (data) {
+          // Insert downloadable file links in the downloadLinks div
+          var linksHtml = "";
+          if (data.mainScad) {
+            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a>';
+          }
+          if (data.frameScad) {
+            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a>';
+          }
+          if (data.logFile) {
+            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a>';
+          }
+          $("#downloadLinks").html(linksHtml);
+        },
+        error: function (err) {
+          console.error("Final render error:", err);
+          alert("An error occurred during final render.");
+        }
+      });
+    });
+  </script>
 </body>
-</html>
 
+</html>
 ```
 
 # views/result.ejs

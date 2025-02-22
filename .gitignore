@@ -2,3 +2,5 @@ codebase.md
 .aidigestignore
 *.log
 node_modules/
+outputs/
+uploads/
