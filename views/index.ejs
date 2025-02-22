@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow City Generator Frontend</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+  <!-- Include jQuery for convenience -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+    .preview-container {
+      margin-top: 20px;
+    }
+
+    .preview-container img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+      padding: 5px;
+    }
+
+    .download-links a {
+      display: block;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1 class="mt-5">Shadow City Generator</h1>
+    <p class="lead">Use the form to upload a GeoJSON file and set options. Live previews and downloadable outputs will
+      appear on the right.</p>
+
+    <!-- Hidden field to store uploaded file path -->
+    <input type="hidden" id="uploadedFile" name="uploadedFile" value="">
+
+    <div class="row">
+      <!-- Left Column: Form and Options -->
+      <div class="col-md-4">
+        <form id="optionsForm">
+          <!-- File Upload -->
+          <div class="form-group">
+            <label for="geojson">GeoJSON File</label>
+            <input type="file" class="form-control-file" id="geojson" name="geojson" required>
+          </div>
+
+          <!-- Basic Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Basic Options</legend>
+            <div class="form-group">
+              <label for="size">Model Size (mm)</label>
+              <input type="number" class="form-control live-preview" id="size" name="size" value="200" required>
+            </div>
+            <div class="form-group">
+              <label for="height">Maximum Height (mm)</label>
+              <input type="number" class="form-control live-preview" id="height" name="height" value="20" required>
+            </div>
+            <div class="form-group">
+              <label for="style">Artistic Style</label>
+              <select class="form-control live-preview" id="style" name="style">
+                <option value="modern" selected>Modern</option>
+                <option value="classic">Classic</option>
+                <option value="minimal">Minimal</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="detail">Detail Level (0-2)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="detail" name="detail" value="1.0"
+                required>
+            </div>
+            <div class="form-group">
+              <label for="merge-distance">Merge Distance</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="merge-distance"
+                name="merge-distance" value="2.0">
+            </div>
+            <div class="form-group">
+              <label for="cluster-size">Cluster Size</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="cluster-size" name="cluster-size"
+                value="3.0">
+            </div>
+            <div class="form-group">
+              <label for="height-variance">Height Variance</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="height-variance"
+                name="height-variance" value="0.2">
+            </div>
+            <div class="form-group">
+              <label for="road-width">Road Width (mm)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="road-width" name="road-width"
+                value="2.0">
+            </div>
+            <div class="form-group">
+              <label for="water-depth">Water Depth (mm)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="water-depth" name="water-depth"
+                value="1.4">
+            </div>
+            <div class="form-group">
+              <label for="min-building-area">Minimum Building Area (m²)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="min-building-area"
+                name="min-building-area" value="600.0">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="debug" name="debug">
+              <label class="form-check-label" for="debug">Enable Debug Output</label>
+            </div>
+          </fieldset>
+
+          <!-- Preprocessing Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preprocessing Options</legend>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
+              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            </div>
+            <div class="form-group">
+              <label for="crop-distance">Crop Distance (meters)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+            </div>
+            <div class="form-group">
+              <label>Crop Bounding Box (SOUTH, WEST, NORTH, EAST)</label>
+              <div class="form-row">
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="South"
+                    name="crop_bbox1">
+                </div>
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="West"
+                    name="crop_bbox2">
+                </div>
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="North"
+                    name="crop_bbox3">
+                </div>
+                <div class="col">
+                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="East"
+                    name="crop_bbox4">
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Export Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Export Options</legend>
+            <div class="form-group">
+              <label for="export">Export Format</label>
+              <select class="form-control live-preview" id="export" name="export">
+                <option value="preview">Preview</option>
+                <option value="stl">STL</option>
+                <option value="both" selected>Both</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="output-stl">Output STL Filename</label>
+              <input type="text" class="form-control live-preview" id="output-stl" name="output-stl"
+                placeholder="Optional">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="no-repair" name="no-repair">
+              <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="force" name="force">
+              <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
+            </div>
+          </fieldset>
+
+          <!-- Preview &amp; Integration Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preview &amp; Integration Options</legend>
+            <div class="form-group">
+              <label>Preview Image Size (Width, Height in pixels)</label>
+              <div class="form-row">
+                <div class="col">
+                  <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
+                    value="1920">
+                </div>
+                <div class="col">
+                  <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
+                    value="1080">
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="preview-file">Preview Image Filename</label>
+              <input type="text" class="form-control live-preview" id="preview-file" name="preview-file"
+                placeholder="Optional">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="watch" name="watch">
+              <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
+            </div>
+            <div class="form-group">
+              <label for="openscad-path">OpenSCAD Executable Path</label>
+              <input type="text" class="form-control live-preview" id="openscad-path" name="openscad-path"
+                placeholder="Optional">
+            </div>
+          </fieldset>
+
+          <!-- Final Render Button -->
+          <button type="button" id="renderBtn" class="btn btn-success mb-3">Render Final Model</button>
+        </form>
+      </div>
+
+      <!-- Right Column: Live Previews and Downloadable Files -->
+      <div class="col-md-8">
+        <div class="preview-container">
+          <h3>Live Preview - Main Model</h3>
+          <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
+        </div>
+        <div class="preview-container">
+          <h3>Live Preview - Frame Model</h3>
+          <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
+        </div>
+        <div class="download-links mt-4">
+          <h4>Download Rendered Files</h4>
+          <div id="downloadLinks">
+            <!-- Links will be inserted here after final render -->
+          </div>
+        </div>
+      </div>
+    </div> <!-- end row -->
+  </div> <!-- end container -->
+
+  <script>
+    // Function to update the live preview images
+    function updatePreview() {
+      var uploadedFile = $("#uploadedFile").val();
+      if (!uploadedFile) {
+        console.log("No file uploaded yet.");
+        return;
+      }
+      // Gather all form data
+      var formData = $("#optionsForm").serializeArray();
+      formData.push({ name: "uploadedFile", value: uploadedFile });
+
+      $.ajax({
+        url: "/preview",
+        type: "POST",
+        data: formData,
+        success: function (data) {
+          if (data.previewMain && data.previewFrame) {
+            $("#previewMain").attr("src", data.previewMain).show();
+            $("#previewFrame").attr("src", data.previewFrame).show();
+          }
+        },
+        error: function (err) {
+          console.error("Preview update error:", err);
+        }
+      });
+    }
+
+    // Upload GeoJSON file via AJAX when the file input changes
+    $("#geojson").on("change", function () {
+      var fileInput = document.getElementById("geojson");
+      if (fileInput.files.length === 0) return;
+
+      var formData = new FormData();
+      formData.append("geojson", fileInput.files[0]);
+
+      $.ajax({
+        url: "/uploadFile",
+        type: "POST",
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function (data) {
+          if (data.filePath) {
+            $("#uploadedFile").val(data.filePath);
+            updatePreview();
+          }
+        },
+        error: function (err) {
+          console.error("File upload error:", err);
+        }
+      });
+    });
+
+    // Update live preview when any option changes
+    $(".live-preview").on("change keyup", function () {
+      updatePreview();
+    });
+
+    // Handle final render button click
+    $("#renderBtn").on("click", function () {
+      var uploadedFile = $("#uploadedFile").val();
+      if (!uploadedFile) {
+        alert("Please upload a GeoJSON file first.");
+        return;
+      }
+      // Gather form data for final render
+      var formData = $("#optionsForm").serializeArray();
+      formData.push({ name: "uploadedFile", value: uploadedFile });
+
+      $.ajax({
+        url: "/render",
+        type: "POST",
+        data: formData,
+        success: function (data) {
+          // Insert downloadable file links in the downloadLinks div
+          var linksHtml = "";
+          if (data.mainScad) {
+            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a>';
+          }
+          if (data.frameScad) {
+            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a>';
+          }
+          if (data.logFile) {
+            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a>';
+          }
+          $("#downloadLinks").html(linksHtml);
+        },
+        error: function (err) {
+          console.error("Final render error:", err);
+          alert("An error occurred during final render.");
+        }
+      });
+    });
+  </script>
+</body>
+
+</html>

@@ -1,198 +1,184 @@
-# lib/preprocessor.py (new file)
-
+# lib/preprocessor.py
 from copy import deepcopy
-from math import radians, cos, sin, sqrt
-import statistics
 import json
+import statistics
+from math import radians, cos, sin, sqrt, pi
+from shapely.geometry import shape, mapping, box, Point
+
 
 class GeoJSONPreprocessor:
     def __init__(self, bbox=None, distance_meters=None):
-        self.bbox = bbox  # [south, west, north, east]
+        """
+        bbox: [south, west, north, east]
+        distance_meters: radius (in meters) to crop from the center
+        """
+        self.bbox = bbox
         self.distance = distance_meters
         self.debug = True
 
-    def is_within_bbox(self, lon, lat):
-        """Check if a point is within the bounding box"""
-        if not self.bbox:
-            return True
-        south, west, north, east = self.bbox
-        return west <= lon <= east and south <= lat <= north
-
-    def is_within_distance(self, lon, lat, center_lon, center_lat):
-        """Check if a point is within the distance bounds from center"""
-        if not self.distance:
-            return True
-        meters_per_degree = 111319.9
-        lat_rad = radians(lat)
-        x = (lon - center_lon) * meters_per_degree * cos(lat_rad)
-        y = (lat - center_lat) * meters_per_degree
-        distance = sqrt(x*x + y*y)
-        return distance <= self.distance
-
-    def is_within_bounds(self, lon, lat, center_lon=None, center_lat=None):
-        """Check if a point is within either bbox or distance bounds"""
-        bbox_check = self.is_within_bbox(lon, lat)
-        if center_lon is not None and center_lat is not None and self.distance:
-            distance_check = self.is_within_distance(lon, lat, center_lon, center_lat)
-            return bbox_check and distance_check
-        return bbox_check
-
-    def extract_coordinates(self, feature):
-        """Extract all coordinates from a feature regardless of geometry type"""
-        geometry = feature['geometry']
-        coords = []
-        
-        if geometry['type'] == 'Point':
-            coords = [geometry['coordinates']]
-        elif geometry['type'] == 'LineString':
-            coords = geometry['coordinates']
-        elif geometry['type'] == 'Polygon':
-            for ring in geometry['coordinates']:
-                coords.extend(ring)
-        elif geometry['type'] == 'MultiPolygon':
-            for polygon in geometry['coordinates']:
-                for ring in polygon:
-                    coords.extend(ring)
-        elif geometry['type'] == 'MultiLineString':
-            for line in geometry['coordinates']:
-                coords.extend(line)
-                
-        return coords
-
-    def crop_feature(self, feature, center_lon=None, center_lat=None):
-        """Crop a feature to the bounded area"""
-        geometry = feature['geometry']
-        
-        if geometry['type'] == 'Point':
-            lon, lat = geometry['coordinates']
-            if self.is_within_bounds(lon, lat, center_lon, center_lat):
-                return feature
-            return None
-            
-        elif geometry['type'] == 'LineString':
-            new_coords = [
-                coord for coord in geometry['coordinates']
-                if self.is_within_bounds(coord[0], coord[1], center_lon, center_lat)
-            ]
-            if len(new_coords) >= 2:
-                new_feature = deepcopy(feature)
-                new_feature['geometry']['coordinates'] = new_coords
-                return new_feature
-            return None
-            
-        elif geometry['type'] in ['Polygon', 'MultiPolygon']:
-            def crop_polygon(coords):
-                new_coords = [
-                    coord for coord in coords
-                    if self.is_within_bounds(coord[0], coord[1], center_lon, center_lat)
-                ]
-                if len(new_coords) >= 3:
-                    if new_coords[0] != new_coords[-1]:
-                        new_coords.append(new_coords[0])
-                    return new_coords
-                return None
-
-            if geometry['type'] == 'Polygon':
-                new_exterior = crop_polygon(geometry['coordinates'][0])
-                if new_exterior:
-                    new_feature = deepcopy(feature)
-                    new_feature['geometry']['coordinates'] = [new_exterior]
-                    return new_feature
-                    
-            else:  # MultiPolygon
-                new_polygons = []
-                for polygon in geometry['coordinates']:
-                    new_poly = crop_polygon(polygon[0])
-                    if new_poly:
-                        new_polygons.append([new_poly])
-                if new_polygons:
-                    new_feature = deepcopy(feature)
-                    new_feature['geometry']['coordinates'] = new_polygons
-                    return new_feature
-                    
-        return None
-
-    def process_geojson(self, input_data):
-        """Process the GeoJSON data"""
-        center_lon = center_lat = None
+    def create_cropping_geometry(self, features):
+        """
+        Create a Shapely geometry to use for cropping. Either a bounding box
+        or a circular buffer.
+        """
         if self.distance:
-            # If using distance, calculate center from features
+            # Calculate center from all features
             all_coords = []
-            for feature in input_data['features']:
-                coords = self.extract_coordinates(feature)
-                all_coords.extend(coords)
-                
+            for feature in features:
+                all_coords.extend(self.extract_coordinates(feature))
             if not all_coords:
                 raise ValueError("No coordinates found in features")
-                
             lons, lats = zip(*all_coords)
             center_lon = statistics.median(lons)
             center_lat = statistics.median(lats)
-            
+            # Convert distance in meters to degrees (approximation)
+            radius_degrees = self.distance / 111320.0
+            cropping_geom = Point(center_lon, center_lat).buffer(radius_degrees)
             if self.debug:
-                print(f"Using center point: {center_lon:.6f}, {center_lat:.6f}")
+                print(
+                    f"Using circular cropping geometry with center: ({center_lon:.6f}, {center_lat:.6f}) and radius (deg): {radius_degrees:.6f}"
+                )
+            return cropping_geom
         elif self.bbox:
+            # bbox provided as [south, west, north, east]
+            south, west, north, east = self.bbox
+            cropping_geom = box(west, south, east, north)
             if self.debug:
-                print(f"Using bounding box: {self.bbox}")
-        
-        # Crop features
+                print(f"Using bounding box cropping geometry: {self.bbox}")
+            return cropping_geom
+        else:
+            return None
+
+    def extract_coordinates(self, feature):
+        """Extract all coordinates from a feature regardless of geometry type"""
+        geometry = feature["geometry"]
+        coords = []
+
+        if geometry["type"] == "Point":
+            coords = [geometry["coordinates"]]
+        elif geometry["type"] == "LineString":
+            coords = geometry["coordinates"]
+        elif geometry["type"] == "Polygon":
+            for ring in geometry["coordinates"]:
+                coords.extend(ring)
+        elif geometry["type"] == "MultiPolygon":
+            for polygon in geometry["coordinates"]:
+                for ring in polygon:
+                    coords.extend(ring)
+        elif geometry["type"] == "MultiLineString":
+            for line in geometry["coordinates"]:
+                coords.extend(line)
+
+        return coords
+
+    def crop_feature(self, feature, cropping_geom):
+        """
+        Crop a feature to the cropping geometry using geometric intersection.
+        Returns a new feature with the clipped geometry, or None if no intersection.
+        """
+        try:
+            geom = shape(feature["geometry"])
+        except Exception as e:
+            if self.debug:
+                print(f"Failed to parse geometry: {e}")
+            return None
+
+        clipped = geom.intersection(cropping_geom)
+        if clipped.is_empty:
+            return None
+
+        # If geometrycollection, pick a valid geometry
+        if clipped.geom_type == "GeometryCollection":
+            valid_geoms = [
+                g
+                for g in clipped
+                if g.geom_type
+                in ["Polygon", "MultiPolygon", "LineString", "MultiLineString"]
+            ]
+            if not valid_geoms:
+                return None
+            # Pick the largest polygon if available; else first valid
+            polygons = [
+                g for g in valid_geoms if g.geom_type in ["Polygon", "MultiPolygon"]
+            ]
+            clipped = (
+                max(polygons, key=lambda g: g.area) if polygons else valid_geoms[0]
+            )
+
+        new_feature = deepcopy(feature)
+        new_feature["geometry"] = mapping(clipped)
+        return new_feature
+
+    def process_geojson(self, input_data):
+        """
+        Process the GeoJSON data by clipping each feature to the defined cropping geometry.
+        """
+        features = input_data.get("features", [])
+        cropping_geom = self.create_cropping_geometry(features)
+        if cropping_geom is None:
+            raise ValueError(
+                "No cropping geometry defined (neither bbox nor distance provided)"
+            )
+
         new_features = []
-        for feature in input_data['features']:
-            cropped = self.crop_feature(feature, center_lon, center_lat)
+        for feature in features:
+            cropped = self.crop_feature(feature, cropping_geom)
             if cropped:
                 new_features.append(cropped)
-                
+
         if self.debug:
-            print(f"Original features: {len(input_data['features'])}")
+            print(f"Original features: {len(features)}")
             print(f"Cropped features: {len(new_features)}")
-            
-        # Create new GeoJSON
-        output_data = {
-            'type': 'FeatureCollection',
-            'features': new_features
-        }
-        
+
+        output_data = {"type": "FeatureCollection", "features": new_features}
         return output_data
 
+
 def main():
-    parser = argparse.ArgumentParser(description='Preprocess GeoJSON for 3D city modeling')
-    parser.add_argument('input_file', help='Input GeoJSON file')
-    parser.add_argument('output_file', help='Output GeoJSON file')
-    parser.add_argument('--distance', type=float,
-                      help='Distance in meters from center to crop')
-    parser.add_argument('--bbox', type=float, nargs=4,
-                      metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
-                      help='Bounding box coordinates (south west north east)')
-    parser.add_argument('--debug', action='store_true',
-                      help='Enable debug output')
-    
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Preprocess GeoJSON for 3D city modeling"
+    )
+    parser.add_argument("input_file", help="Input GeoJSON file")
+    parser.add_argument("output_file", help="Output GeoJSON file")
+    parser.add_argument(
+        "--distance", type=float, help="Distance in meters from center to crop"
+    )
+    parser.add_argument(
+        "--bbox",
+        type=float,
+        nargs=4,
+        metavar=("SOUTH", "WEST", "NORTH", "EAST"),
+        help="Bounding box coordinates (south west north east)",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+
     args = parser.parse_args()
-    
+
     if not args.distance and not args.bbox:
         parser.error("Either --distance or --bbox must be specified")
-    
+
     try:
-        # Read input file
-        with open(args.input_file, 'r') as f:
+        with open(args.input_file, "r") as f:
             input_data = json.load(f)
-            
-        # Process data
+
         processor = GeoJSONPreprocessor(
             bbox=args.bbox if args.bbox else None,
-            distance_meters=args.distance if args.distance else None
+            distance_meters=args.distance if args.distance else None,
         )
         processor.debug = args.debug
         output_data = processor.process_geojson(input_data)
-        
-        # Write output file
-        with open(args.output_file, 'w') as f:
+
+        with open(args.output_file, "w") as f:
             json.dump(output_data, f, indent=2)
-            
+
         print(f"Successfully processed GeoJSON data and saved to {args.output_file}")
-        
+
     except Exception as e:
         print(f"Error: {str(e)}")
         raise
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
