@@ -21,7 +21,7 @@ import argparse
 import time
 from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
-from lib.preview import OpenSCADIntegration
+from lib.preview.openscad_integration import OpenSCADIntegration
 
 
 def main():
@@ -246,157 +246,6 @@ if __name__ == "__main__":
 
 ```
 
-# lib/block_combiner.py
-
-```py
-# lib/block_combiner.py
-from shapely.geometry import Polygon, MultiPolygon, box, LineString, mapping
-from shapely.ops import unary_union, polygonize
-from shapely.validation import make_valid
-from .geometry import GeometryUtils
-
-
-class BlockCombiner:
-    def __init__(self, style_manager):
-        self.style_manager = style_manager
-        self.geometry = GeometryUtils()
-        self.debug = False
-
-    def combine_buildings_by_block(self, features):
-        """
-        Fill each block that has any building coverage.
-        """
-        if self.debug:
-            print("\nStarting block combination process...")
-            print(f"Number of input buildings: {len(features.get('buildings', []))}")
-
-        # Create blocks from road network
-        blocks = self._create_blocks_from_roads(features.get("roads", []))
-        if self.debug:
-            print(f"Created {len(blocks)} blocks from road network")
-
-        # Convert all buildings, no minimum size filtering
-        building_polygons = []
-        for building in features.get("buildings", []):
-            try:
-                # Always try to create polygon, regardless of size
-                poly = Polygon(building["coords"])
-                height = building.get("height", 5.0)  # Default height if not specified
-
-                if poly.is_valid:
-                    building_polygons.append((poly, height))
-                else:
-                    fixed_poly = make_valid(poly)
-                    if isinstance(fixed_poly, MultiPolygon):
-                        for p in fixed_poly.geoms:
-                            if p.is_valid:
-                                building_polygons.append((p, height))
-                    elif fixed_poly.is_valid:
-                        building_polygons.append((fixed_poly, height))
-            except Exception as e:
-                if self.debug:
-                    print(f"Error processing building: {e}")
-                continue
-
-        if self.debug:
-            print(f"Processed {len(building_polygons)} valid building polygons")
-
-        # Create a union of all buildings for coverage checking
-        all_buildings = unary_union([poly for poly, _ in building_polygons])
-        if not all_buildings.is_valid:
-            all_buildings = make_valid(all_buildings)
-
-        combined_buildings = []
-        default_height = 5.0
-
-        # Process each block
-        for block_idx, block in enumerate(blocks):
-            try:
-                # Check for any building intersection, no matter how small
-                if block.intersects(all_buildings):
-                    # Find all buildings in this block
-                    block_heights = []
-                    for building_poly, height in building_polygons:
-                        if block.intersects(building_poly):
-                            intersection = block.intersection(building_poly)
-                            if intersection.area > 0:
-                                block_heights.append((height, intersection.area))
-
-                    # Get block height
-                    if block_heights:
-                        # Use height of largest building
-                        block_height = max(block_heights, key=lambda x: x[1])[0]
-                    else:
-                        block_height = default_height
-
-                    # Create slightly smaller block footprint
-                    block_shape = block.buffer(-0.1)
-                    if block_shape.is_valid:
-                        coords = list(block_shape.exterior.coords)[:-1]
-                        combined_buildings.append(
-                            {"coords": coords, "height": block_height, "is_block": True}
-                        )
-                        if self.debug:
-                            print(f"Added block {block_idx} with height {block_height}")
-
-            except Exception as e:
-                if self.debug:
-                    print(f"Error processing block {block_idx}: {e}")
-                continue
-
-        if self.debug:
-            print(f"\nFinal combined buildings count: {len(combined_buildings)}")
-
-        return combined_buildings
-
-    def _create_blocks_from_roads(self, roads):
-        """
-        Create blocks from road network.
-        """
-        try:
-            road_polys = []
-            road_width = self.style_manager.get_default_layer_specs()["roads"]["width"]
-
-            for road in roads:
-                try:
-                    line = LineString(road["coords"])
-                    buffered = line.buffer(road_width / 2)
-                    if buffered.is_valid:
-                        road_polys.append(buffered)
-                except Exception as e:
-                    if self.debug:
-                        print(f"Error processing road: {e}")
-                    continue
-
-            if not road_polys:
-                return []
-
-            road_union = unary_union(road_polys)
-            if not road_union.is_valid:
-                road_union = make_valid(road_union)
-
-            bounds = road_union.bounds
-            area = box(*bounds)
-            blocks_area = area.difference(road_union)
-
-            if isinstance(blocks_area, MultiPolygon):
-                blocks = [poly for poly in blocks_area.geoms if poly.is_valid]
-            else:
-                blocks = [blocks_area] if blocks_area.is_valid else []
-
-            # No minimum block size filtering
-            if self.debug:
-                print(f"Created {len(blocks)} blocks")
-
-            return blocks
-
-        except Exception as e:
-            if self.debug:
-                print(f"Error creating blocks from roads: {e}")
-            return []
-
-```
-
 # lib/converter.py
 
 ```py
@@ -404,7 +253,7 @@ class BlockCombiner:
 import json
 from .feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
-from .style_manager import StyleManager
+from .style.style_manager import StyleManager
 
 
 class EnhancedCityConverter:
@@ -564,6 +413,7 @@ from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
 from .geometry import GeometryUtils
+from .style.style_manager import StyleManager
 
 
 class FeatureProcessor:
@@ -1399,11 +1249,334 @@ class OpenSCADIntegration:
 
 ```
 
+# lib/preview/__init__.py
+
+```py
+from .openscad_integration import OpenSCADIntegration
+
+```
+
+# lib/preview/export_manager.py
+
+```py
+# lib/preview/export_manager.py
+import os
+import subprocess
+
+
+class ExportManager:
+    def __init__(self, openscad_path):
+        self.openscad_path = openscad_path
+        self.export_quality = {
+            "fn": 256,
+            "fa": 2,
+            "fs": 0.2,
+        }
+
+    def generate_stl(self, scad_file, output_stl, repair=True):
+        """Generate STL files for both main model and frame."""
+        try:
+            main_scad_file = scad_file.replace(".scad", "_main.scad")
+            frame_scad_file = scad_file.replace(".scad", "_frame.scad")
+
+            if not all(os.path.exists(f) for f in [main_scad_file, frame_scad_file]):
+                raise FileNotFoundError("Required SCAD files not found")
+
+            main_stl = output_stl.replace(".stl", "_main.stl")
+            frame_stl = output_stl.replace(".stl", "_frame.stl")
+
+            env = os.environ.copy()
+            env["OPENSCAD_HEADLESS"] = "1"
+
+            # Generate main model STL
+            self._generate_single_stl(main_scad_file, main_stl, env)
+
+            # Generate frame STL
+            self._generate_single_stl(frame_scad_file, frame_stl, env)
+
+            return True
+
+        except Exception as e:
+            print(f"Error generating STL: {str(e)}")
+            raise
+
+    def _generate_single_stl(self, input_file, output_file, env):
+        """Generate STL for a single model."""
+        command = [
+            self.openscad_path,
+            "--backend=Manifold",
+            "--export-format=binstl",
+            "-o",
+            output_file,
+        ]
+
+        # Add quality settings
+        for param, value in self.export_quality.items():
+            command.extend(["-D", f"${param}={value}"])
+
+        command.append(input_file)
+
+        subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+
+```
+
+# lib/preview/file_watcher.py
+
+```py
+# lib/preview/file_watcher.py
+import os
+import sys
+import time
+import threading
+import subprocess
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+
+class FileWatcher:
+    def __init__(self):
+        self.observer = None
+        self.watch_thread = None
+        self.running = False
+
+    def watch_and_reload(self, scad_file, openscad_path):
+        """Watch SCAD file and trigger auto-reload in OpenSCAD."""
+        subprocess.Popen([openscad_path, scad_file])
+
+        class SCDHandler(FileSystemEventHandler):
+            def __init__(self, scad_path):
+                self.scad_path = scad_path
+                self.last_reload = 0
+                self.reload_cooldown = 1.0
+
+            def on_modified(self, event):
+                if event.src_path == self.scad_path:
+                    current_time = time.time()
+                    if current_time - self.last_reload >= self.reload_cooldown:
+                        self._reload_openscad()
+                        self.last_reload = current_time
+
+            def _reload_openscad(self):
+                if sys.platform == "win32":
+                    self._reload_windows()
+                elif sys.platform == "darwin":
+                    self._reload_macos()
+                else:
+                    self._reload_linux()
+
+            def _reload_windows(self):
+                import win32gui
+                import win32con
+
+                def callback(hwnd, _):
+                    if "OpenSCAD" in win32gui.GetWindowText(hwnd):
+                        win32gui.SetForegroundWindow(hwnd)
+                        win32gui.PostMessage(
+                            hwnd, win32con.WM_KEYDOWN, win32con.VK_F5, 0
+                        )
+
+                win32gui.EnumWindows(callback, None)
+
+            def _reload_macos(self):
+                subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        'tell application "OpenSCAD" to activate\n'
+                        + 'tell application "System Events"\n'
+                        + 'keystroke "r" using {command down}\n'
+                        + "end tell",
+                    ]
+                )
+
+            def _reload_linux(self):
+                try:
+                    subprocess.run(
+                        [
+                            "xdotool",
+                            "search",
+                            "--name",
+                            "OpenSCAD",
+                            "windowactivate",
+                            "--sync",
+                            "key",
+                            "F5",
+                        ]
+                    )
+                except:
+                    print(
+                        "Warning: xdotool not found. Auto-reload may not work on Linux."
+                    )
+
+        self.running = True
+        event_handler = SCDHandler(os.path.abspath(scad_file))
+        self.observer = Observer()
+        self.observer.schedule(
+            event_handler, os.path.dirname(scad_file), recursive=False
+        )
+        self.observer.start()
+
+        def watch_thread():
+            while self.running:
+                time.sleep(1)
+            self.observer.stop()
+            self.observer.join()
+
+        self.watch_thread = threading.Thread(target=watch_thread)
+        self.watch_thread.start()
+
+    def stop_watching(self):
+        """Stop watching the SCAD file."""
+        if self.running:
+            self.running = False
+            if self.watch_thread:
+                self.watch_thread.join()
+                self.watch_thread = None
+
+```
+
+# lib/preview/openscad_integration.py
+
+```py
+# lib/preview/openscad_integration.py
+import subprocess
+import os
+import sys
+from .preview_generator import PreviewGenerator
+from .export_manager import ExportManager
+from .file_watcher import FileWatcher
+
+
+class OpenSCADIntegration:
+    def __init__(self, openscad_path=None):
+        self.openscad_path = openscad_path or self._find_openscad()
+        if not self.openscad_path:
+            raise RuntimeError("Could not find OpenSCAD executable")
+
+        self.preview_generator = PreviewGenerator(self.openscad_path)
+        self.export_manager = ExportManager(self.openscad_path)
+        self.file_watcher = FileWatcher()
+
+    def _find_openscad(self):
+        """Find the OpenSCAD executable."""
+        if sys.platform == "win32":
+            possible_paths = [
+                r"C:\Program Files\OpenSCAD\openscad.exe",
+                r"C:\Program Files (x86)\OpenSCAD\openscad.exe",
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+        elif sys.platform == "darwin":
+            possible_paths = [
+                "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
+                os.path.expanduser(
+                    "~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+                ),
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+        else:  # Linux
+            try:
+                return subprocess.check_output(["which", "openscad"]).decode().strip()
+            except subprocess.CalledProcessError:
+                pass
+        return None
+
+    def generate_preview(self, output_file, output_image, size=(1920, 1080)):
+        """Generate preview using PreviewGenerator."""
+        return self.preview_generator.generate(output_file, output_image, size)
+
+    def generate_stl(self, scad_file, output_stl, repair=True):
+        """Generate STL using ExportManager."""
+        return self.export_manager.generate_stl(scad_file, output_stl, repair)
+
+    def watch_and_reload(self, scad_file):
+        """Watch SCAD file using FileWatcher."""
+        return self.file_watcher.watch_and_reload(scad_file, self.openscad_path)
+
+    def stop_watching(self):
+        """Stop file watching."""
+        self.file_watcher.stop_watching()
+
+```
+
+# lib/preview/preview_generator.py
+
+```py
+# lib/preview/preview_generator.py
+import os
+import subprocess
+
+
+class PreviewGenerator:
+    def __init__(self, openscad_path):
+        self.openscad_path = openscad_path
+
+    def generate(self, output_file, output_image, size=(1920, 1080)):
+        """Generate preview images for both main model and frame."""
+        main_scad_file = output_file.replace(".scad", "_main.scad")
+        frame_scad_file = output_file.replace(".scad", "_frame.scad")
+
+        if not all(os.path.exists(f) for f in [main_scad_file, frame_scad_file]):
+            raise FileNotFoundError("Required SCAD files not found")
+
+        env = os.environ.copy()
+        env["OPENSCAD_HEADLESS"] = "1"
+
+        # Generate previews for main and frame
+        return self._generate_model_preview(
+            main_scad_file, frame_scad_file, output_image, size, env
+        )
+
+    def _generate_model_preview(self, main_file, frame_file, output_image, size, env):
+        """Generate preview for a specific model file."""
+        try:
+            # Generate main preview
+            main_preview = output_image.replace(".png", "_main.png")
+            self._run_preview_command(main_file, main_preview, size, env)
+
+            # Generate frame preview
+            frame_preview = output_image.replace(".png", "_frame.png")
+            self._run_preview_command(
+                frame_file, frame_preview, size, env, is_frame=True
+            )
+
+            return True
+        except subprocess.CalledProcessError as e:
+            print("Error generating preview:", e)
+            print("OpenSCAD output:", e.stdout)
+            print("OpenSCAD errors:", e.stderr)
+            return False
+
+    def _run_preview_command(self, input_file, output_file, size, env, is_frame=False):
+        """Run OpenSCAD command to generate preview."""
+        command = [
+            self.openscad_path,
+            "--backend=Manifold",
+            "--preview=throwntogether",
+            "--imgsize",
+            f"{size[0]},{size[1]}",
+            "--autocenter",
+            "--colorscheme=Nature",
+        ]
+
+        if is_frame:
+            command.extend(["--viewall", "--projection=perspective"])
+
+        command.extend(["-o", output_file, input_file])
+
+        subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+
+```
+
 # lib/scad_generator.py
 
 ```py
 # lib/scad_generator.py
 from .geometry import GeometryUtils
+from .style.style_manager import StyleManager
 
 
 class ScadGenerator:
@@ -1626,7 +1799,7 @@ difference() {{
 from math import log10, sin, cos, pi, atan2
 from shapely.geometry import LineString
 from .geometry import GeometryUtils
-from .block_combiner import BlockCombiner
+from .style.block_combiner import BlockCombiner
 
 
 class StyleManager:
@@ -1843,6 +2016,475 @@ class StyleManager:
 
     def set_current_features(self, features):
         """Store current features for block-combine style to use"""
+        self.current_features = features
+
+```
+
+# lib/style/__init__.py
+
+```py
+from .style_manager import StyleManager
+
+```
+
+# lib/style/artistic_effects.py
+
+```py
+# lib/style/artistic_effects.py
+from math import sin, cos, pi, atan2
+
+
+class ArtisticEffects:
+    def __init__(self, style_manager):
+        self.style_manager = style_manager
+
+    def create_artistic_hull(self, points):
+        """Create artistic hull from points based on style settings."""
+        if len(points) < 3:
+            return points
+
+        from ..geometry import GeometryUtils
+
+        geometry = GeometryUtils()
+
+        center = geometry.calculate_centroid(points)
+        sorted_points = self._sort_points_by_angle(points, center)
+        hull = self._generate_hull_points(sorted_points, geometry)
+
+        return self._add_artistic_variation(hull)
+
+    def _sort_points_by_angle(self, points, center):
+        """Sort points by angle around center."""
+        return sorted(points, key=lambda p: atan2(p[1] - center[1], p[0] - center[0]))
+
+    def _generate_hull_points(self, sorted_points, geometry):
+        """Generate hull points with optional detail points."""
+        hull = []
+        detail_level = self.style_manager.style["detail_level"]
+        cluster_size = self.style_manager.style["cluster_size"]
+
+        for i in range(len(sorted_points)):
+            p1 = sorted_points[i]
+            p2 = sorted_points[(i + 1) % len(sorted_points)]
+            hull.append(p1)
+
+            if detail_level > 0.5:
+                self._add_detail_points(
+                    hull, p1, p2, detail_level, cluster_size, geometry
+                )
+
+        return hull
+
+    def _add_detail_points(self, hull, p1, p2, detail_level, cluster_size, geometry):
+        """Add intermediate detail points between two points."""
+        dist = geometry.calculate_distance(p1, p2)
+        if dist > cluster_size:
+            num_points = int(detail_level * dist / cluster_size)
+            for j in range(num_points):
+                t = (j + 1) / (num_points + 1)
+                mx = p1[0] + t * (p2[0] - p1[0])
+                my = p1[1] + t * (p2[1] - p1[1])
+                offset = self.style_manager.style["height_variance"] * sin(t * pi)
+                hull.append([mx + offset, my - offset])
+
+    def _add_artistic_variation(self, coords):
+        """Add style-specific variations to coordinates."""
+        varied = []
+        variance = self.style_manager.style["height_variance"]
+        style = self.style_manager.style["artistic_style"]
+
+        if style == "modern":
+            for i, (x, y) in enumerate(coords):
+                offset = variance * sin(i * pi / len(coords))
+                varied.append([x + offset, y + offset])
+        elif style == "classic":
+            for i, (x, y) in enumerate(coords):
+                angle = 2.0 * pi * i / len(coords)
+                offset_x = variance * cos(angle)
+                offset_y = variance * sin(angle)
+                varied.append([x + offset_x, y + offset_y])
+        else:  # minimal or block-combine
+            varied = coords
+
+        return varied
+
+```
+
+# lib/style/block_combiner.py
+
+```py
+# lib/block_combiner.py
+from shapely.geometry import Polygon, MultiPolygon, box, LineString, mapping
+from shapely.ops import unary_union, polygonize
+from shapely.validation import make_valid
+from ..geometry import GeometryUtils
+from .style_manager import StyleManager
+
+
+class BlockCombiner:
+    def __init__(self, style_manager):
+        self.style_manager = style_manager
+        self.geometry = GeometryUtils()
+        self.debug = False
+
+    def combine_buildings_by_block(self, features):
+        """
+        Fill each block that has any building coverage.
+        """
+        if self.debug:
+            print("\nStarting block combination process...")
+            print(f"Number of input buildings: {len(features.get('buildings', []))}")
+
+        # Create blocks from road network
+        blocks = self._create_blocks_from_roads(features.get("roads", []))
+        if self.debug:
+            print(f"Created {len(blocks)} blocks from road network")
+
+        # Convert all buildings, no minimum size filtering
+        building_polygons = []
+        for building in features.get("buildings", []):
+            try:
+                # Always try to create polygon, regardless of size
+                poly = Polygon(building["coords"])
+                height = building.get("height", 5.0)  # Default height if not specified
+
+                if poly.is_valid:
+                    building_polygons.append((poly, height))
+                else:
+                    fixed_poly = make_valid(poly)
+                    if isinstance(fixed_poly, MultiPolygon):
+                        for p in fixed_poly.geoms:
+                            if p.is_valid:
+                                building_polygons.append((p, height))
+                    elif fixed_poly.is_valid:
+                        building_polygons.append((fixed_poly, height))
+            except Exception as e:
+                if self.debug:
+                    print(f"Error processing building: {e}")
+                continue
+
+        if self.debug:
+            print(f"Processed {len(building_polygons)} valid building polygons")
+
+        # Create a union of all buildings for coverage checking
+        all_buildings = unary_union([poly for poly, _ in building_polygons])
+        if not all_buildings.is_valid:
+            all_buildings = make_valid(all_buildings)
+
+        combined_buildings = []
+        default_height = 5.0
+
+        # Process each block
+        for block_idx, block in enumerate(blocks):
+            try:
+                # Check for any building intersection, no matter how small
+                if block.intersects(all_buildings):
+                    # Find all buildings in this block
+                    block_heights = []
+                    for building_poly, height in building_polygons:
+                        if block.intersects(building_poly):
+                            intersection = block.intersection(building_poly)
+                            if intersection.area > 0:
+                                block_heights.append((height, intersection.area))
+
+                    # Get block height
+                    if block_heights:
+                        # Use height of largest building
+                        block_height = max(block_heights, key=lambda x: x[1])[0]
+                    else:
+                        block_height = default_height
+
+                    # Create slightly smaller block footprint
+                    block_shape = block.buffer(-0.1)
+                    if block_shape.is_valid:
+                        coords = list(block_shape.exterior.coords)[:-1]
+                        combined_buildings.append(
+                            {"coords": coords, "height": block_height, "is_block": True}
+                        )
+                        if self.debug:
+                            print(f"Added block {block_idx} with height {block_height}")
+
+            except Exception as e:
+                if self.debug:
+                    print(f"Error processing block {block_idx}: {e}")
+                continue
+
+        if self.debug:
+            print(f"\nFinal combined buildings count: {len(combined_buildings)}")
+
+        return combined_buildings
+
+    def _create_blocks_from_roads(self, roads):
+        """
+        Create blocks from road network.
+        """
+        try:
+            road_polys = []
+            road_width = self.style_manager.get_default_layer_specs()["roads"]["width"]
+
+            for road in roads:
+                try:
+                    line = LineString(road["coords"])
+                    buffered = line.buffer(road_width / 2)
+                    if buffered.is_valid:
+                        road_polys.append(buffered)
+                except Exception as e:
+                    if self.debug:
+                        print(f"Error processing road: {e}")
+                    continue
+
+            if not road_polys:
+                return []
+
+            road_union = unary_union(road_polys)
+            if not road_union.is_valid:
+                road_union = make_valid(road_union)
+
+            bounds = road_union.bounds
+            area = box(*bounds)
+            blocks_area = area.difference(road_union)
+
+            if isinstance(blocks_area, MultiPolygon):
+                blocks = [poly for poly in blocks_area.geoms if poly.is_valid]
+            else:
+                blocks = [blocks_area] if blocks_area.is_valid else []
+
+            # No minimum block size filtering
+            if self.debug:
+                print(f"Created {len(blocks)} blocks")
+
+            return blocks
+
+        except Exception as e:
+            if self.debug:
+                print(f"Error creating blocks from roads: {e}")
+            return []
+
+```
+
+# lib/style/building_merger.py
+
+```py
+# lib/style/building_merger.py
+from shapely.geometry import LineString
+from ..geometry import GeometryUtils
+
+
+class BuildingMerger:
+    def __init__(self, style_manager):
+        self.style_manager = style_manager
+        self.geometry = GeometryUtils()
+
+    def merge_buildings(self, buildings, barrier_union=None):
+        """Choose and execute merging strategy."""
+        if self.style_manager.style["artistic_style"] == "block-combine":
+            return self._merge_by_blocks(buildings)
+        else:
+            return self._merge_by_distance(buildings, barrier_union)
+
+    def _merge_by_blocks(self, buildings):
+        """Merge buildings by block."""
+        from .block_combiner import BlockCombiner  # Local import
+
+        block_combiner = BlockCombiner(self.style_manager)
+        return block_combiner.combine_buildings_by_block(
+            self.style_manager.current_features
+        )
+
+    def _merge_by_distance(self, buildings, barrier_union):
+        """Merge buildings based on distance."""
+        merge_dist = self.style_manager.style["merge_distance"]
+        if merge_dist <= 0:
+            return buildings
+
+        indexed_buildings = self._index_buildings(buildings)
+        visited = set()
+        clusters = []
+
+        for i, centroidA, bldgA in indexed_buildings:
+            if i in visited:
+                continue
+
+            cluster = self._build_cluster(
+                i, indexed_buildings, visited, barrier_union, merge_dist
+            )
+            merged = self._merge_cluster(cluster)
+            clusters.append(merged)
+
+        return clusters
+
+    def _index_buildings(self, buildings):
+        """Create indexed building list with centroids."""
+        return [
+            (idx, self.geometry.calculate_centroid(bldg["coords"]), bldg)
+            for idx, bldg in enumerate(buildings)
+        ]
+
+    def _build_cluster(
+        self, start_idx, indexed_buildings, visited, barrier_union, merge_dist
+    ):
+        """Build a cluster of buildings starting from given index."""
+        stack = [start_idx]
+        cluster = []
+        visited.add(start_idx)
+
+        while stack:
+            current_idx = stack.pop()
+            _, current_centroid, current_bldg = indexed_buildings[current_idx]
+            cluster.append(current_bldg)
+
+            for j, centroidB, bldgB in indexed_buildings:
+                if j not in visited:
+                    dist = self.geometry.calculate_distance(current_centroid, centroidB)
+                    if dist < merge_dist:
+                        if not self._is_blocked(
+                            current_centroid, centroidB, barrier_union
+                        ):
+                            visited.add(j)
+                            stack.append(j)
+
+        return cluster
+
+    def _is_blocked(self, ptA, ptB, barrier_union):
+        """Check if line between points is blocked by barrier."""
+        if barrier_union is None:
+            return False
+        line = LineString([ptA, ptB])
+        return line.intersects(barrier_union)
+
+    def _merge_cluster(self, cluster):
+        """Merge a cluster of buildings into one shape."""
+        if len(cluster) == 1:
+            return cluster[0]
+
+        total_area = 0.0
+        weighted_height = 0.0
+        all_coords = []
+
+        for b in cluster:
+            coords = b["coords"]
+            area = self.geometry.calculate_polygon_area(coords)
+            total_area += area
+            weighted_height += b["height"] * area
+            all_coords.extend(coords)
+
+        avg_height = (
+            weighted_height / total_area if total_area > 0 else cluster[0]["height"]
+        )
+        hull_coords = self.style_manager.artistic_effects.create_artistic_hull(
+            all_coords
+        )
+
+        return {
+            "coords": hull_coords,
+            "height": avg_height,
+            "is_cluster": True,
+            "size": len(cluster),
+        }
+
+```
+
+# lib/style/height_manager.py
+
+```py
+# lib/style/height_manager.py
+from math import log10
+
+
+class HeightManager:
+    def __init__(self, style_manager):
+        self.style_manager = style_manager
+
+    def scale_height(self, properties):
+        """Scale building height based on properties."""
+        height_m = self._extract_height(properties)
+        return self._scale_to_range(height_m)
+
+    def _extract_height(self, properties):
+        """Extract height from building properties."""
+        default_height = 5.0
+
+        if "height" in properties:
+            try:
+                return float(properties["height"].split()[0])
+            except (ValueError, IndexError):
+                pass
+        elif "building:levels" in properties:
+            try:
+                levels = float(properties["building:levels"])
+                return levels * 3  # assume 3m per level
+            except ValueError:
+                pass
+
+        return default_height
+
+    def _scale_to_range(self, height_m):
+        """Scale height to target range using logarithmic scaling."""
+        layer_specs = self.style_manager.get_default_layer_specs()
+        min_height = layer_specs["buildings"]["min_height"]
+        max_height = layer_specs["buildings"]["max_height"]
+
+        # Log scaling from 1..100 meters -> min_height..max_height in mm
+        log_min = log10(1.0)
+        log_max = log10(101.0)
+        log_height = log10(height_m + 1.0)  # +1 to avoid log(0)
+        scaled = (log_height - log_min) / (log_max - log_min)
+        final_height = min_height + scaled * (max_height - min_height)
+        return round(final_height, 2)
+
+```
+
+# lib/style/style_manager.py
+
+```py
+# lib/style/style_manager.py
+from .building_merger import BuildingMerger
+from .height_manager import HeightManager
+from .artistic_effects import ArtisticEffects
+
+
+class StyleManager:
+    def __init__(self, style_settings=None):
+        # Initialize default style settings
+        self.style = {
+            "merge_distance": 2.0,
+            "cluster_size": 3.0,
+            "height_variance": 0.2,
+            "detail_level": 1.0,
+            "artistic_style": "modern",
+            "min_building_area": 600.0,
+        }
+
+        # Override defaults with provided settings
+        if style_settings:
+            self.style.update(style_settings)
+
+        # Initialize components
+        self.building_merger = BuildingMerger(self)
+        self.height_manager = HeightManager(self)
+        self.artistic_effects = ArtisticEffects(self)
+        self.current_features = {}
+
+    def get_default_layer_specs(self):
+        """Get default layer specifications."""
+        return {
+            "water": {"depth": 3},
+            "roads": {"depth": 1.6, "width": 2.0},
+            "railways": {"depth": 1.2, "width": 1.5},
+            "buildings": {"min_height": 2, "max_height": 6},
+            "base": {"height": 10},
+        }
+
+    def scale_building_height(self, properties):
+        """Scale building height using HeightManager."""
+        return self.height_manager.scale_height(properties)
+
+    def merge_nearby_buildings(self, buildings, barrier_union=None):
+        """Merge buildings using BuildingMerger."""
+        return self.building_merger.merge_buildings(buildings, barrier_union)
+
+    def set_current_features(self, features):
+        """Store current features."""
         self.current_features = features
 
 ```

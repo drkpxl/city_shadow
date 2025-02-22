@@ -1,5 +1,6 @@
 # lib/scad_generator.py
 from .geometry import GeometryUtils
+from .style.style_manager import StyleManager
 
 
 class ScadGenerator:

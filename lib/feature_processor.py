@@ -3,6 +3,7 @@ from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
 from .geometry import GeometryUtils
+from .style.style_manager import StyleManager
 
 
 class FeatureProcessor:

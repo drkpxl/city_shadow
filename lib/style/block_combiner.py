@@ -2,7 +2,8 @@
 from shapely.geometry import Polygon, MultiPolygon, box, LineString, mapping
 from shapely.ops import unary_union, polygonize
 from shapely.validation import make_valid
-from .geometry import GeometryUtils
+from ..geometry import GeometryUtils
+from .style_manager import StyleManager
 
 
 class BlockCombiner:

@@ -2,7 +2,7 @@
 import json
 from .feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
-from .style_manager import StyleManager
+from .style.style_manager import StyleManager
 
 
 class EnhancedCityConverter:

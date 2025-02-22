@@ -3,7 +3,7 @@ import argparse
 import time
 from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
-from lib.preview import OpenSCADIntegration
+from lib.preview.openscad_integration import OpenSCADIntegration
 
 
 def main():

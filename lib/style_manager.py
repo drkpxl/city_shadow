@@ -2,7 +2,7 @@
 from math import log10, sin, cos, pi, atan2
 from shapely.geometry import LineString
 from .geometry import GeometryUtils
-from .block_combiner import BlockCombiner
+from .style.block_combiner import BlockCombiner
 
 
 class StyleManager:
