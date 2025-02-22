@@ -4,6 +4,15 @@
 
 ```
 
+# .gitignore
+
+```
+codebase.md
+.aidigestignore
+*.log
+
+```
+
 # geojson_to_shadow_city.py
 
 ```py
@@ -107,7 +116,7 @@ class EnhancedCityConverter:
             self.debug_log.append(message)
 
     def convert(self, input_file, output_file):
-        """Convert GeoJSON to OpenSCAD file"""
+        """Convert GeoJSON to separate OpenSCAD files for main model and frame"""
         try:
             # Read input file
             with open(input_file) as f:
@@ -118,24 +127,31 @@ class EnhancedCityConverter:
             features = self.feature_processor.process_features(data, self.size)
             
             # Generate main model SCAD code
-            self.print_debug("\nGenerating OpenSCAD code...")
+            self.print_debug("\nGenerating main model OpenSCAD code...")
             main_scad = self.scad_generator.generate_openscad(
                 features, 
                 self.size, 
                 self.layer_specs
             )
             
-            # Generate frame SCAD code using the helper method
+            # Generate frame SCAD code
+            self.print_debug("\nGenerating frame OpenSCAD code...")
             frame_scad = self._generate_frame(self.size, self.max_height)
             
-            # Combine main model and frame in a union block
-            final_scad = f"union() {{\n{main_scad}\n{frame_scad}\n}}"
+            # Determine output filenames
+            main_file = output_file.replace('.scad', '_main.scad')
+            frame_file = output_file.replace('.scad', '_frame.scad')
             
-            # Write output
-            with open(output_file, 'w') as f:
-                f.write(final_scad)
+            # Write main model
+            with open(main_file, 'w') as f:
+                f.write(main_scad)
             
-            self.print_debug(f"\nSuccessfully created {output_file}")
+            # Write frame
+            with open(frame_file, 'w') as f:
+                f.write(frame_scad)
+            
+            self.print_debug(f"\nSuccessfully created main model: {main_file}")
+            self.print_debug(f"Successfully created frame: {frame_file}")
             self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
@@ -153,22 +169,24 @@ class EnhancedCityConverter:
 
     def _generate_frame(self, size, height):
         """
-        Generate a frame around the entire [0,0] to [size,size] area.
-        The data is already inset 5mm on each side, so the 'inner' region is [5,5] → [size-5,size-5].
-        We make a difference of two cubes to produce a 5mm frame.
+        Generate a frame that will fit around the main model.
+        The frame's inner dimensions match the main model size exactly,
+        with a 5mm border around all sides.
         """
-        return f"""
-    // Frame around the model
-    difference() {{
-        // Outer block: [0,0,0] to [size, size, height]
+        frame_size = size + 10  # Add 10mm to total size (5mm on each side)
+        return f"""// Frame for city model
+// Outer size: {frame_size}mm x {frame_size}mm x {height}mm
+// Inner size: {size}mm x {size}mm x {height}mm
+// Frame width: 5mm
+
+difference() {{
+    // Outer block (10mm larger than main model)
+    cube([{frame_size}, {frame_size}, {height}]);
+    
+    // Inner cutout (sized to match main model exactly)
+    translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
-        // Subtract the inner region: shift by [5,5], then [size-10, size-10] wide
-        translate([5, 5, 0])
-            cube([{size-10}, {size-10}, {height}]);
-    }}
-    """
-
-
+}}"""
 ```
 
 # lib/feature_processor.py
@@ -186,7 +204,6 @@ class FeatureProcessor:
         """Process and enhance GeoJSON features"""
         transform = self.geometry.create_coordinate_transformer(
             geojson_data['features'],
-            self.style_manager.get_border_width(),
             size
         )
         
@@ -247,7 +264,6 @@ class FeatureProcessor:
         elif 'natural' in props and props['natural'] == 'water':
             transformed = [transform(lon, lat) for lon, lat in coords]
             features['water'].append(transformed)
-
 ```
 
 # lib/geometry.py
@@ -257,8 +273,8 @@ class FeatureProcessor:
 from math import sqrt, sin, cos, pi, atan2, radians
 
 class GeometryUtils:
-    def create_coordinate_transformer(self, features, border_width, size):
-        """Create a coordinate transformation function"""
+    def create_coordinate_transformer(self, features, size):
+        """Create a coordinate transformation function without border inset"""
         all_coords = []
         for feature in features:
             coords = self.extract_coordinates(feature)
@@ -272,14 +288,10 @@ class GeometryUtils:
         min_lon, max_lon = min(lons), max(lons)
         min_lat, max_lat = min(lats), max(lats)
         
-        available_size = size - 2 * border_width
-        
         def transform(lon, lat):
             x = (lon - min_lon) / (max_lon - min_lon) if (max_lon != min_lon) else 0.5
             y = (lat - min_lat) / (max_lat - min_lat) if (max_lat != min_lat) else 0.5
-            final_x = border_width + (x * available_size)
-            final_y = border_width + (y * available_size)
-            return [final_x, final_y]
+            return [x * size, y * size]
 
         return transform
 
@@ -388,7 +400,6 @@ class GeometryUtils:
             area -= xy_points[j][0] * xy_points[i][1]
         
         return abs(area) / 2.0
-
 ```
 
 # lib/scad_generator.py
@@ -403,7 +414,7 @@ class ScadGenerator:
         self.geometry = GeometryUtils()
 
     def generate_openscad(self, features, size, layer_specs):
-        """Generate complete OpenSCAD code with all features"""
+        """Generate complete OpenSCAD code for main model without frame"""
         # Start with header and base
         scad = self._generate_header(size, layer_specs)
         
@@ -426,6 +437,7 @@ class ScadGenerator:
 // Style: {self.style_manager.style['artistic_style']}
 // Detail Level: {self.style_manager.style['detail_level']}
 
+// Main city model without frame
 union() {{
     difference() {{
         // Base
@@ -566,8 +578,6 @@ union() {{
             return f'''
                 linear_extrude(height={height}, convexity=2)
                     polygon([{points_str}]);'''
-
-
 ```
 
 # lib/style_manager.py
@@ -579,9 +589,6 @@ from .geometry import GeometryUtils
 
 class StyleManager:
     def __init__(self, style_settings=None):
-        # CHANGED: we now use 5 mm to create an inset around the data
-        self.border_width = 5
-        self.base_height = 10
         self.geometry = GeometryUtils()
         
         # Default style settings
@@ -599,35 +606,27 @@ class StyleManager:
             self.style.update(style_settings)
 
     def get_default_layer_specs(self):
-        """Get default layer specifications"""
+        """Get default layer specifications without border insets"""
         return {
             'water': {
                 'depth': 2,
-                'inset': self.border_width
             },
             'roads': {
                 'depth': 1.4,
                 'width': 2.0,
-                'inset': self.border_width
             },
             'railways': {
                 'depth': 1.4,
                 'width': 1.5,
-                'inset': self.border_width
             },
             'buildings': {
                 'min_height': 2,
                 'max_height': 6
             },
             'base': {
-                'height': self.base_height,
-                'inset': self.border_width
+                'height': 10,  # Base height of 10mm
             }
         }
-
-    def get_border_width(self):
-        """Get border width setting"""
-        return self.border_width
 
     def scale_building_height(self, properties):
         """Scale building height using log scaling"""
@@ -651,7 +650,6 @@ class StyleManager:
         min_height = self.get_default_layer_specs()['buildings']['min_height']
         max_height = self.get_default_layer_specs()['buildings']['max_height']
         
-        from math import log10
         log_height = log10(height_m + 1)
         log_min = log10(1)
         log_max = log10(101)
@@ -663,6 +661,10 @@ class StyleManager:
 
     def merge_nearby_buildings(self, buildings):
         """Merge buildings that are close to each other into clusters"""
+        # If merge_distance is 0, skip merging entirely
+        if self.style['merge_distance'] <= 0:
+            return buildings
+            
         clusters = []
         processed = set()
         
@@ -784,7 +786,6 @@ class StyleManager:
                         hull.append([mid_x + offset, mid_y - offset])
         
         return hull
-
 ```
 
 # output.scad.log
@@ -802,6 +803,168 @@ Style settings used:
   height_variance: 0.2
   detail_level: 0.3
   artistic_style: classic
+```
+
+# README.md
+
+```md
+# Shadow City Generator - Artist's Guide
+
+Create beautiful, 3D-printable city maps from OpenStreetMap data. This tool generates two separate files - a main city model and a decorative frame that can be printed separately and assembled.
+
+## Quick Start
+
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad [artistic options]
+\`\`\`
+
+This creates:
+- `output_main.scad` - The city model
+- `output_frame.scad` - A decorative frame that fits around the model
+
+## Artistic Options
+
+### Overall Style
+\`\`\`bash
+--style [modern|classic|minimal]
+\`\`\`
+- `modern`: Sharp, angular designs with contemporary architectural details
+- `classic`: Softer edges with traditional architectural elements
+- `minimal`: Clean, simplified shapes without additional ornamentation
+
+### Size and Scale
+\`\`\`bash
+--size 200        # Size of the model in millimeters (default: 200)
+--height 20       # Maximum height of buildings in millimeters (default: 20)
+\`\`\`
+
+### Detail and Complexity
+\`\`\`bash
+--detail 1.0      # Detail level from 0-2 (default: 1.0)
+\`\`\`
+Higher values add more intricate architectural details and smoother transitions between elements.
+
+### Building Features
+
+#### Shaping Your City's Style
+
+The Shadow City Generator gives you powerful creative control over how buildings appear in your model. You can create everything from precise architectural reproductions to artistic interpretations of urban spaces.
+
+#### Building Size Selection
+\`\`\`bash
+--min-building-area 600
+\`\`\`
+Think of this like adjusting the level of detail in your city:
+- Low values (200-400): Include small buildings like houses and shops
+- Medium values (600-800): Focus on medium-sized structures
+- High values (1000+): Show only larger buildings like offices and apartments
+
+#### Artistic Building Combinations
+\`\`\`bash
+--merge-distance 2.0
+\`\`\`
+This is where the real artistic magic happens. This setting determines how buildings flow together:
+- `--merge-distance 0`: Each building stands alone - perfect for architectural studies or precise city representations
+- `--merge-distance 1-2`: Nearby buildings gently blend together, creating small architectural groupings
+- `--merge-distance 3-5`: Buildings flow into each other more dramatically, forming artistic interpretations of city blocks
+- `--merge-distance 6+`: Creates bold, abstract representations where buildings merge into sculptural forms
+
+Think of it like adjusting the "softness" of your city's appearance:
+- Sharp and distinct: Use 0
+- Gentle grouping: Use 1-2
+- Flowing forms: Use 3-5
+- Abstract sculpture: Use 6+
+
+#### Height Artistry
+\`\`\`bash
+--height-variance 0.2
+\`\`\`
+This adds personality to your buildings' heights:
+- `0.0`: All buildings in a group stay the same height
+- `0.1-0.2`: Subtle height variations for natural feel
+- `0.3-0.5`: More dramatic height differences
+- `0.6+`: Bold, artistic height variations
+
+### Road and Water Features
+\`\`\`bash
+--road-width 2.0          # Width of roads in millimeters (default: 2.0)
+--water-depth 1.4         # Depth of water features in millimeters (default: 1.4)
+\`\`\`
+
+### Building Clusters
+\`\`\`bash
+--cluster-size 3.0        # Size threshold for building clusters (default: 3.0)
+\`\`\`
+Controls how building clusters are formed when merging nearby structures.
+
+## Creative Styles
+
+### Contemporary Urban Center
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad \
+  --style modern \
+  --detail 0.5 \
+  --merge-distance 0 \
+  --min-building-area 1000 \
+  --road-width 1.5
+\`\`\`
+Creates a sleek, modern cityscape with distinct buildings and clean lines.
+
+### Historic District
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad \
+  --style classic \
+  --detail 1.5 \
+  --merge-distance 3 \
+  --min-building-area 400 \
+  --height-variance 0.3
+\`\`\`
+Produces an organic feel with clustered buildings and traditional architectural details.
+
+### Abstract City Plan
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad \
+  --style minimal \
+  --detail 0.3 \
+  --merge-distance 0 \
+  --road-width 1.5 \
+  --water-depth 2
+\`\`\`
+Creates a stark, minimalist view emphasizing urban layout and form.
+
+## Printing Guide
+
+1. Print the main model (`output_main.scad`) and frame (`output_frame.scad`) separately
+2. The frame has a 5mm border and will be slightly larger than the main model
+3. Suggested print settings:
+   - Layer height: 0.2mm for good detail
+   - Consider different colors for frame and city
+   - Frame often looks best in white or a contrasting color
+
+## Artistic Adjustments
+
+### For a Cleaner Look
+- Increase `--min-building-area`
+- Decrease `--detail`
+- Use `--style minimal`
+- Set `--merge-distance` to 0
+
+### For a More Artistic Interpretation
+- Increase `--merge-distance`
+- Increase `--height-variance`
+- Use `--style classic`
+- Increase `--detail`
+
+### For Emphasizing Urban Features
+- Adjust `--road-width` to highlight street patterns
+- Increase `--water-depth` to emphasize waterways
+- Lower `--min-building-area` to include more architectural detail
+
+### For a Simplified View
+- Use `--style minimal`
+- Set `--detail` to 0.3 or lower
+- Increase `--min-building-area`
+- Set `--merge-distance` to 0
 ```
 
 # requirements.txt
