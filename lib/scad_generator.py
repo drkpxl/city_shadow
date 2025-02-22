@@ -245,8 +245,8 @@ difference() {{
         """Generate OpenSCAD code for bridges with improved 3D printing support"""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = 3.0  # Height above base
-        bridge_thickness = 1.5  # Thickness for stability
+        bridge_height = 2.0  # Height above base
+        bridge_thickness = 1  # Thickness for stability
         support_width = 2.0  # Width of bridge supports
         road_width = layer_specs["roads"]["width"]
 

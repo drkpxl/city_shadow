@@ -32,16 +32,16 @@ class StyleManager:
                 "depth": 3,
             },
             "roads": {
-                "depth": 1.6,
+                "depth": 0.6,
                 "width": 2.0,
             },
             "railways": {
-                "depth": 1.2,
+                "depth": 0.2,
                 "width": 1.5,
             },
-            "buildings": {"min_height": 2, "max_height": 6},
+            "buildings": {"min_height": 2, "max_height": 5},
             "base": {
-                "height": 10,
+                "height": 5,
             },
         }
 
@@ -50,7 +50,7 @@ class StyleManager:
         Given a building's OSM properties, produce a scaled building height (in mm).
         Uses a simple log scaling approach to map real-world height to a small range.
         """
-        default_height = 5.0
+        default_height = 4.0
 
         height_m = None
         if "height" in properties:
