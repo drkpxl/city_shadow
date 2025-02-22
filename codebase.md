@@ -11,6 +11,8 @@ codebase.md
 .aidigestignore
 *.log
 node_modules/
+outputs/
+uploads/
 ```
 
 # geojson_to_shadow_city.py
@@ -1015,315 +1017,6 @@ if __name__ == "__main__":
 
 ```
 
-# lib/preview.py
-
-```py
-import subprocess
-import os
-import sys
-import tempfile
-import threading
-import time
-from PIL import Image, ImageEnhance
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
-
-class OpenSCADIntegration:
-    def __init__(self, openscad_path=None):
-        """Initialize OpenSCAD integration with an optional path to the OpenSCAD executable."""
-        self.openscad_path = openscad_path or self._find_openscad()
-        if not self.openscad_path:
-            raise RuntimeError("Could not find OpenSCAD executable")
-
-        # For file watching
-        self.observer = None
-        self.watch_thread = None
-        self.running = False
-
-        # Export quality settings
-        self.export_quality = {
-            "fn": 256,  # High-quality circles
-            "fa": 2,  # Minimum angle
-            "fs": 0.2,  # Minimum size
-        }
-
-    def _find_openscad(self):
-        """Find the OpenSCAD executable."""
-        if sys.platform == "win32":
-            possible_paths = [
-                r"C:\Program Files\OpenSCAD\openscad.exe",
-                r"C:\Program Files (x86)\OpenSCAD\openscad.exe",
-            ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    return path
-        elif sys.platform == "darwin":
-            possible_paths = [
-                "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
-                os.path.expanduser(
-                    "~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
-                ),
-            ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    return path
-        else:  # Linux
-            try:
-                return subprocess.check_output(["which", "openscad"]).decode().strip()
-            except subprocess.CalledProcessError:
-                pass
-        return None
-
-    def generate_preview(self, output_file, output_image, size=(1920, 1080)):
-        """Generate a high-quality PNG preview of the SCAD file."""
-        # Get paths for main and frame files
-        main_scad_file = output_file.replace(".scad", "_main.scad")
-        frame_scad_file = output_file.replace(".scad", "_frame.scad")
-        main_scad_file = os.path.abspath(main_scad_file)
-        frame_scad_file = os.path.abspath(frame_scad_file)
-        output_image = os.path.abspath(output_image)
-
-        if not os.path.exists(main_scad_file):
-            raise FileNotFoundError(f"Main SCAD file not found: {main_scad_file}")
-        if not os.path.exists(frame_scad_file):
-            raise FileNotFoundError(f"Frame SCAD file not found: {frame_scad_file}")
-
-        env = os.environ.copy()
-        env["OPENSCAD_HEADLESS"] = "1"
-
-        # Preview for main model
-        main_preview = output_image.replace(".png", "_main.png")
-        command_main = [
-            self.openscad_path,
-            "--backend=Manifold",
-            "--preview=throwntogether",
-            "--imgsize",
-            f"{size[0]},{size[1]}",
-            "--autocenter",
-            "--colorscheme=Nature",
-            "-o",
-            main_preview,
-            main_scad_file,
-        ]
-
-        # Preview for frame
-        frame_preview = output_image.replace(".png", "_frame.png")
-        command_frame = [
-            self.openscad_path,
-            "--backend=Manifold",
-            "--preview=throwntogether",
-            "--imgsize",
-            f"{size[0]},{size[1]}",
-            "--autocenter",
-            "--viewall",
-            "--colorscheme=Nature",
-            "--projection=perspective",
-            "-o",
-            frame_preview,
-            frame_scad_file,
-        ]
-
-        try:
-            print("\nGenerating preview for main model...")
-            subprocess.run(
-                command_main, env=env, capture_output=True, text=True, check=True
-            )
-
-            print("Generating preview for frame...")
-            subprocess.run(
-                command_frame, env=env, capture_output=True, text=True, check=True
-            )
-
-            print(f"Preview images generated:")
-            print(f"Main model: {main_preview}")
-            print(f"Frame: {frame_preview}")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            print("Error generating preview:", e)
-            print("OpenSCAD output:", e.stdout)
-            print("OpenSCAD errors:", e.stderr)
-            return False
-
-    def generate_stl(self, scad_file, output_stl, repair=True):
-        """
-        Generate high-quality STL files for both main model and frame.
-        """
-        try:
-            main_scad_file = scad_file.replace(".scad", "_main.scad")
-            frame_scad_file = scad_file.replace(".scad", "_frame.scad")
-            main_scad_file = os.path.abspath(main_scad_file)
-            frame_scad_file = os.path.abspath(frame_scad_file)
-
-            main_stl = output_stl.replace(".stl", "_main.stl")
-            frame_stl = output_stl.replace(".stl", "_frame.stl")
-            main_stl = os.path.abspath(main_stl)
-            frame_stl = os.path.abspath(frame_stl)
-
-            if not os.path.exists(main_scad_file):
-                raise FileNotFoundError(f"Main SCAD file not found: {main_scad_file}")
-            if not os.path.exists(frame_scad_file):
-                raise FileNotFoundError(f"Frame SCAD file not found: {frame_scad_file}")
-
-            env = os.environ.copy()
-            env["OPENSCAD_HEADLESS"] = "1"
-
-            command_main = [
-                self.openscad_path,
-                "--backend=Manifold",
-                "--export-format=binstl",
-                "-o",
-                main_stl,
-                "-D",
-                f'$fn={self.export_quality["fn"]}',
-                "-D",
-                f'$fa={self.export_quality["fa"]}',
-                "-D",
-                f'$fs={self.export_quality["fs"]}',
-                main_scad_file,
-            ]
-
-            command_frame = [
-                self.openscad_path,
-                "--backend=Manifold",
-                "--export-format=binstl",
-                "-o",
-                frame_stl,
-                "-D",
-                f'$fn={self.export_quality["fn"]}',
-                "-D",
-                f'$fa={self.export_quality["fa"]}',
-                "-D",
-                f'$fs={self.export_quality["fs"]}',
-                frame_scad_file,
-            ]
-
-            print("\nGenerating high-quality STL files")
-            print("Using quality settings:")
-            print(f"  $fn: {self.export_quality['fn']}")
-            print(f"  $fa: {self.export_quality['fa']}")
-            print(f"  $fs: {self.export_quality['fs']}")
-
-            print("\nGenerating main model STL...")
-            subprocess.run(
-                command_main, env=env, capture_output=True, text=True, check=True
-            )
-
-            print("Generating frame STL...")
-            subprocess.run(
-                command_frame, env=env, capture_output=True, text=True, check=True
-            )
-
-            if not os.path.exists(main_stl):
-                raise RuntimeError(f"Main STL file was not created: {main_stl}")
-            if not os.path.exists(frame_stl):
-                raise RuntimeError(f"Frame STL file was not created: {frame_stl}")
-
-            main_size = os.path.getsize(main_stl)
-            frame_size = os.path.getsize(frame_stl)
-
-            print(f"\nSuccessfully generated STL files:")
-            print(f"Main model: {main_stl} ({main_size/1024/1024:.1f} MB)")
-            print(f"Frame: {frame_stl} ({frame_size/1024/1024:.1f} MB)")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            print("Error generating STL:", e)
-            print("OpenSCAD output:", e.stdout if e.stdout else "No output")
-            print("OpenSCAD errors:", e.stderr if e.stderr else "No errors")
-            raise
-        except Exception as e:
-            print(f"Error generating STL: {str(e)}")
-            raise
-
-    def watch_and_reload(self, scad_file):
-        """Watch the SCAD file and trigger auto-reload in OpenSCAD."""
-        if not self.openscad_path:
-            raise RuntimeError("OpenSCAD not found")
-
-        subprocess.Popen([self.openscad_path, scad_file])
-
-        class SCDHandler(FileSystemEventHandler):
-            def __init__(self, scad_path):
-                self.scad_path = scad_path
-                self.last_reload = 0
-                self.reload_cooldown = 1.0
-
-            def on_modified(self, event):
-                if event.src_path == self.scad_path:
-                    current_time = time.time()
-                    if current_time - self.last_reload >= self.reload_cooldown:
-                        if sys.platform == "win32":
-                            import win32gui
-                            import win32con
-
-                            def callback(hwnd, _):
-                                if "OpenSCAD" in win32gui.GetWindowText(hwnd):
-                                    win32gui.SetForegroundWindow(hwnd)
-                                    win32gui.PostMessage(
-                                        hwnd, win32con.WM_KEYDOWN, win32con.VK_F5, 0
-                                    )
-
-                            win32gui.EnumWindows(callback, None)
-                        elif sys.platform == "darwin":
-                            subprocess.run(
-                                [
-                                    "osascript",
-                                    "-e",
-                                    'tell application "OpenSCAD" to activate\n'
-                                    + 'tell application "System Events"\n'
-                                    + 'keystroke "r" using {command down}\n'
-                                    + "end tell",
-                                ]
-                            )
-                        else:  # Linux
-                            try:
-                                subprocess.run(
-                                    [
-                                        "xdotool",
-                                        "search",
-                                        "--name",
-                                        "OpenSCAD",
-                                        "windowactivate",
-                                        "--sync",
-                                        "key",
-                                        "F5",
-                                    ]
-                                )
-                            except:
-                                print(
-                                    "Warning: xdotool not found. Auto-reload may not work on Linux."
-                                )
-                        self.last_reload = current_time
-
-        self.running = True
-        event_handler = SCDHandler(os.path.abspath(scad_file))
-        self.observer = Observer()
-        self.observer.schedule(
-            event_handler, os.path.dirname(scad_file), recursive=False
-        )
-        self.observer.start()
-
-        def watch_thread():
-            while self.running:
-                time.sleep(1)
-            self.observer.stop()
-            self.observer.join()
-
-        self.watch_thread = threading.Thread(target=watch_thread)
-        self.watch_thread.start()
-
-    def stop_watching(self):
-        """Stop watching the SCAD file."""
-        if self.running:
-            self.running = False
-            if self.watch_thread:
-                self.watch_thread.join()
-                self.watch_thread = None
-
-```
-
 # lib/preview/__init__.py
 
 ```py
@@ -1896,8 +1589,8 @@ difference() {{
         """Generate OpenSCAD code for bridges with improved 3D printing support"""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = 3.0  # Height above base
-        bridge_thickness = 1.5  # Thickness for stability
+        bridge_height = 2.0  # Height above base
+        bridge_thickness = 1  # Thickness for stability
         support_width = 2.0  # Width of bridge supports
         road_width = layer_specs["roads"]["width"]
 
@@ -1969,16 +1662,16 @@ class StyleManager:
                 "depth": 3,
             },
             "roads": {
-                "depth": 1.6,
+                "depth": 0.6,
                 "width": 2.0,
             },
             "railways": {
-                "depth": 1.2,
+                "depth": 0.2,
                 "width": 1.5,
             },
-            "buildings": {"min_height": 2, "max_height": 6},
+            "buildings": {"min_height": 2, "max_height": 5},
             "base": {
-                "height": 10,
+                "height": 5,
             },
         }
 
@@ -1987,7 +1680,7 @@ class StyleManager:
         Given a building's OSM properties, produce a scaled building height (in mm).
         Uses a simple log scaling approach to map real-world height to a small range.
         """
-        default_height = 5.0
+        default_height = 4.0
 
         height_m = None
         if "height" in properties:
@@ -2650,6 +2343,10 @@ class StyleManager:
 
 ```
 
+# psl
+
+This is a binary file of the type: Binary
+
 # public/css/style.css
 
 ```css
@@ -3190,10 +2887,22 @@ app.post("/render", (req, res) => {
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
+    // New: include STL download links if export mode is "stl" or "both"
+    let stlFiles = {};
+    if (req.body.export === "stl" || req.body.export === "both") {
+      const mainStl = outputBase + "_main.stl";
+      const frameStl = outputBase + "_frame.stl";
+      stlFiles = {
+        mainStl: "/outputs/" + mainStl,
+        frameStl: "/outputs/" + frameStl,
+      };
+    }
+
     res.json({
       mainScad: "/outputs/" + mainScad,
       frameScad: "/outputs/" + frameScad,
       logFile: "/outputs/" + logFile,
+      stlFiles: stlFiles,
       stdout: stdoutData,
       stderr: stderrData,
     });
@@ -3202,7 +2911,6 @@ app.post("/render", (req, res) => {
 
 // Fallback /upload endpoint (if needed for non-AJAX uploads)
 app.post("/upload", upload.single("geojson"), (req, res) => {
-  // This endpoint remains unchanged for direct uploads
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
   }
@@ -3262,7 +2970,7 @@ app.listen(port, () => {
           <!-- File Upload -->
           <div class="form-group">
             <label for="geojson">GeoJSON File</label>
-            <input type="file" class="form-control-file" id="geojson" name="geojson" required>
+            <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
           </div>
 
           <!-- Basic Options -->
@@ -3385,7 +3093,7 @@ app.listen(port, () => {
             </div>
           </fieldset>
 
-          <!-- Preview &amp; Integration Options -->
+          <!-- Preview & Integration Options -->
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Preview &amp; Integration Options</legend>
             <div class="form-group">
@@ -3519,15 +3227,28 @@ app.listen(port, () => {
         success: function (data) {
           // Insert downloadable file links in the downloadLinks div
           var linksHtml = "";
+
+          // SCAD downloads
           if (data.mainScad) {
-            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a>';
+            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a><br>';
           }
           if (data.frameScad) {
-            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a>';
+            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
           }
+
+          // STL downloads: add these lines to ensure STL links are displayed
+          if (data.stlFiles && data.stlFiles.mainStl) {
+            linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
+          }
+          if (data.stlFiles && data.stlFiles.frameStl) {
+            linksHtml += '<a href="' + data.stlFiles.frameStl + '" download>Frame Model (STL)</a><br>';
+          }
+
+          // Debug log
           if (data.logFile) {
-            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a>';
+            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a><br>';
           }
+
           $("#downloadLinks").html(linksHtml);
         },
         error: function (err) {
@@ -3566,9 +3287,17 @@ app.listen(port, () => {
       <li class="list-group-item">
         <a href="<%= frameScad %>" download>Frame Model (SCAD)</a>
       </li>
-      <li class="list-group-item">
-        <a href="<%= logFile %>" download>Debug Log</a>
-      </li>
+      <% if (stlFiles && stlFiles.mainStl) { %>
+        <li class="list-group-item">
+          <a href="<%= stlFiles.mainStl %>" download>Main Model (STL)</a>
+        </li>
+        <li class="list-group-item">
+          <a href="<%= stlFiles.frameStl %>" download>Frame Model (STL)</a>
+        </li>
+        <% } %>
+          <li class="list-group-item">
+            <a href="<%= logFile %>" download>Debug Log</a>
+          </li>
     </ul>
     <hr>
     <h3>Process Output</h3>

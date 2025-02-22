@@ -43,7 +43,6 @@
           <div class="form-group">
             <label for="geojson">GeoJSON File</label>
             <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
-
           </div>
 
           <!-- Basic Options -->
@@ -166,7 +165,7 @@
             </div>
           </fieldset>
 
-          <!-- Preview &amp; Integration Options -->
+          <!-- Preview & Integration Options -->
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Preview &amp; Integration Options</legend>
             <div class="form-group">
@@ -300,15 +299,28 @@
         success: function (data) {
           // Insert downloadable file links in the downloadLinks div
           var linksHtml = "";
+
+          // SCAD downloads
           if (data.mainScad) {
-            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a>';
+            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a><br>';
           }
           if (data.frameScad) {
-            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a>';
+            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
           }
+
+          // STL downloads: add these lines to ensure STL links are displayed
+          if (data.stlFiles && data.stlFiles.mainStl) {
+            linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
+          }
+          if (data.stlFiles && data.stlFiles.frameStl) {
+            linksHtml += '<a href="' + data.stlFiles.frameStl + '" download>Frame Model (STL)</a><br>';
+          }
+
+          // Debug log
           if (data.logFile) {
-            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a>';
+            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a><br>';
           }
+
           $("#downloadLinks").html(linksHtml);
         },
         error: function (err) {
