@@ -10,7 +10,7 @@
 codebase.md
 .aidigestignore
 *.log
-
+node_modules/
 ```
 
 # geojson_to_shadow_city.py
@@ -902,13 +902,12 @@ class OpenSCADIntegration:
         main_preview = output_image.replace(".png", "_main.png")
         command_main = [
             self.openscad_path,
+            "--backend=Manifold",
             "--preview=throwntogether",
             "--imgsize",
             f"{size[0]},{size[1]}",
             "--autocenter",
-            "--viewall",
             "--colorscheme=Nature",
-            "--projection=perspective",
             "-o",
             main_preview,
             main_scad_file,
@@ -918,6 +917,7 @@ class OpenSCADIntegration:
         frame_preview = output_image.replace(".png", "_frame.png")
         command_frame = [
             self.openscad_path,
+            "--backend=Manifold",
             "--preview=throwntogether",
             "--imgsize",
             f"{size[0]},{size[1]}",
@@ -1391,7 +1391,7 @@ class StyleManager:
                 "depth": 3,
             },
             "roads": {
-                "depth": 2,
+                "depth": 0.6,
                 "width": 2.0,
             },
             "railways": {
@@ -1568,6 +1568,69 @@ class StyleManager:
                         hull.append([mid_x + offset, mid_y - offset])
 
         return hull
+
+```
+
+# outputs/output-1740237402466_preview_frame.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237402466_preview_main.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237446234_preview_frame.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237446234_preview_main.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237502382_preview_frame.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237502382_preview_main.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237510895_preview_frame.png
+
+This is a binary file of the type: Image
+
+# outputs/output-1740237510895_preview_main.png
+
+This is a binary file of the type: Image
+
+# package.json
+
+```json
+{
+  "name": "shadow-city-frontend",
+  "version": "1.0.0",
+  "description": "Node frontend to interact with the Shadow City Generator command line tool",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "1.4.5-lts.1",
+    "ejs": "^3.1.8",
+    "uuid": "^9.0.0"
+  }
+}
+
+```
+
+# public/css/style.css
+
+```css
+body {
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
 
 ```
 
@@ -1832,5 +1895,394 @@ watchdog>=2.1.0  # For file watching
 # Platform-specific requirements (comment out what you don't need):
 pywin32>=228; sys_platform == 'win32'  # For Windows auto-reload
 # Note: Linux requires xdotool (install via package manager)
+```
+
+# server.js
+
+```js
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const { spawn } = require("child_process");
+const fs = require("fs");
+const { v4: uuidv4 } = require("uuid");
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Set view engine to EJS
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+
+// Serve static files from public and output directories
+app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static("uploads"));
+app.use("/outputs", express.static("outputs"));
+
+// Ensure uploads and outputs directories exist
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+const outputsDir = path.join(__dirname, "outputs");
+if (!fs.existsSync(outputsDir)) {
+  fs.mkdirSync(outputsDir);
+}
+
+// Setup Multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/");
+  },
+  filename: function (req, file, cb) {
+    // Generate a unique filename to avoid collisions
+    const uniqueSuffix = Date.now() + "-" + uuidv4();
+    cb(null, uniqueSuffix + "-" + file.originalname);
+  },
+});
+const upload = multer({ storage: storage });
+
+// GET home page – upload form
+app.get("/", (req, res) => {
+  res.render("index");
+});
+
+// POST /upload – handle file upload and invoke the Python tool
+app.post("/upload", upload.single("geojson"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).send("No file uploaded.");
+  }
+
+  // Generate a unique output base name (without extension)
+  const outputBase = "output-" + Date.now();
+  const outputPath = path.join(outputsDir, outputBase + ".scad");
+
+  // Build arguments for the Python tool:
+  // Basic required arguments: input and output file.
+  const args = [
+    path.join(__dirname, "geojson_to_shadow_city.py"),
+    path.join(__dirname, req.file.path),
+    outputPath,
+  ];
+
+  // Basic options
+  if (req.body.size) args.push("--size", req.body.size);
+  if (req.body.height) args.push("--height", req.body.height);
+  if (req.body.style) args.push("--style", req.body.style);
+  if (req.body.detail) args.push("--detail", req.body.detail);
+  if (req.body["merge-distance"])
+    args.push("--merge-distance", req.body["merge-distance"]);
+  if (req.body["cluster-size"])
+    args.push("--cluster-size", req.body["cluster-size"]);
+  if (req.body["height-variance"])
+    args.push("--height-variance", req.body["height-variance"]);
+  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
+  if (req.body["water-depth"])
+    args.push("--water-depth", req.body["water-depth"]);
+  if (req.body["min-building-area"])
+    args.push("--min-building-area", req.body["min-building-area"]);
+  if (req.body.debug === "on") args.push("--debug");
+
+  // Preprocessing options
+  if (req.body.preprocess === "on") args.push("--preprocess");
+  if (req.body["crop-distance"])
+    args.push("--crop-distance", req.body["crop-distance"]);
+  // Expecting four separate fields for crop bbox
+  if (
+    req.body.crop_bbox1 &&
+    req.body.crop_bbox2 &&
+    req.body.crop_bbox3 &&
+    req.body.crop_bbox4
+  ) {
+    args.push(
+      "--crop-bbox",
+      req.body.crop_bbox1,
+      req.body.crop_bbox2,
+      req.body.crop_bbox3,
+      req.body.crop_bbox4
+    );
+  }
+
+  // Export options
+  if (req.body.export) args.push("--export", req.body.export);
+  if (req.body["output-stl"]) args.push("--output-stl", req.body["output-stl"]);
+  if (req.body["no-repair"] === "on") args.push("--no-repair");
+  if (req.body.force === "on") args.push("--force");
+
+  // Preview and Integration options
+  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
+    args.push(
+      "--preview-size",
+      req.body["preview-size-width"],
+      req.body["preview-size-height"]
+    );
+  }
+  if (req.body["preview-file"])
+    args.push("--preview-file", req.body["preview-file"]);
+  if (req.body.watch === "on") args.push("--watch");
+  if (req.body["openscad-path"])
+    args.push("--openscad-path", req.body["openscad-path"]);
+
+  // Log the arguments for debugging
+  console.log("Running Python command with args:", args.join(" "));
+
+  // Spawn the Python process
+  const pythonProcess = spawn("python3", args);
+
+  let stdoutData = "";
+  let stderrData = "";
+
+  pythonProcess.stdout.on("data", (data) => {
+    stdoutData += data.toString();
+  });
+
+  pythonProcess.stderr.on("data", (data) => {
+    stderrData += data.toString();
+  });
+
+  pythonProcess.on("close", (code) => {
+    if (code !== 0) {
+      console.error(`Python process exited with code ${code}`);
+      console.error(stderrData);
+      return res.status(500).send("Error processing file: " + stderrData);
+    }
+
+    // Determine the names of the generated output files.
+    // For example, if outputPath is "outputs/output-123456789.scad",
+    // it will create:
+    //   - outputs/output-123456789_main.scad
+    //   - outputs/output-123456789_frame.scad
+    //   - outputs/output-123456789.scad.log
+    const mainScad = outputBase + "_main.scad";
+    const frameScad = outputBase + "_frame.scad";
+    const logFile = outputBase + ".scad.log";
+
+    // Render the result page with download links
+    res.render("result", {
+      mainScad: "/outputs/" + mainScad,
+      frameScad: "/outputs/" + frameScad,
+      logFile: "/outputs/" + logFile,
+      stdout: stdoutData,
+      stderr: stderrData,
+    });
+  });
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+
+```
+
+# views/index.ejs
+
+```ejs
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow City Generator Frontend</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1 class="mt-5">Shadow City Generator</h1>
+    <p class="lead">Upload a GeoJSON file and set your options to generate a 3D-printable city model.</p>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      
+      <!-- File Upload -->
+      <div class="form-group">
+        <label for="geojson">GeoJSON File</label>
+        <input type="file" class="form-control-file" id="geojson" name="geojson" required>
+      </div>
+
+      <!-- Basic Options -->
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Basic Options</legend>
+        <div class="form-group">
+          <label for="size">Model Size (mm)</label>
+          <input type="number" class="form-control" id="size" name="size" value="200" required>
+        </div>
+        <div class="form-group">
+          <label for="height">Maximum Height (mm)</label>
+          <input type="number" class="form-control" id="height" name="height" value="20" required>
+        </div>
+        <div class="form-group">
+          <label for="style">Artistic Style</label>
+          <select class="form-control" id="style" name="style">
+            <option value="modern" selected>Modern</option>
+            <option value="classic">Classic</option>
+            <option value="minimal">Minimal</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="detail">Detail Level (0-2)</label>
+          <input type="number" step="0.1" class="form-control" id="detail" name="detail" value="1.0" required>
+        </div>
+        <div class="form-group">
+          <label for="merge-distance">Merge Distance</label>
+          <input type="number" step="0.1" class="form-control" id="merge-distance" name="merge-distance" value="2.0">
+        </div>
+        <div class="form-group">
+          <label for="cluster-size">Cluster Size</label>
+          <input type="number" step="0.1" class="form-control" id="cluster-size" name="cluster-size" value="3.0">
+        </div>
+        <div class="form-group">
+          <label for="height-variance">Height Variance</label>
+          <input type="number" step="0.1" class="form-control" id="height-variance" name="height-variance" value="0.2">
+        </div>
+        <div class="form-group">
+          <label for="road-width">Road Width (mm)</label>
+          <input type="number" step="0.1" class="form-control" id="road-width" name="road-width" value="2.0">
+        </div>
+        <div class="form-group">
+          <label for="water-depth">Water Depth (mm)</label>
+          <input type="number" step="0.1" class="form-control" id="water-depth" name="water-depth" value="1.4">
+        </div>
+        <div class="form-group">
+          <label for="min-building-area">Minimum Building Area (m²)</label>
+          <input type="number" step="0.1" class="form-control" id="min-building-area" name="min-building-area" value="600.0">
+        </div>
+        <div class="form-group form-check">
+          <input type="checkbox" class="form-check-input" id="debug" name="debug">
+          <label class="form-check-label" for="debug">Enable Debug Output</label>
+        </div>
+      </fieldset>
+
+      <!-- Preprocessing Options -->
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Preprocessing Options</legend>
+        <div class="form-group form-check">
+          <input type="checkbox" class="form-check-input" id="preprocess" name="preprocess">
+          <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+        </div>
+        <div class="form-group">
+          <label for="crop-distance">Crop Distance (meters)</label>
+          <input type="number" step="0.1" class="form-control" id="crop-distance" name="crop-distance">
+        </div>
+        <div class="form-group">
+          <label>Crop Bounding Box (SOUTH, WEST, NORTH, EAST)</label>
+          <div class="form-row">
+            <div class="col">
+              <input type="number" step="0.0001" class="form-control" placeholder="South" name="crop_bbox1">
+            </div>
+            <div class="col">
+              <input type="number" step="0.0001" class="form-control" placeholder="West" name="crop_bbox2">
+            </div>
+            <div class="col">
+              <input type="number" step="0.0001" class="form-control" placeholder="North" name="crop_bbox3">
+            </div>
+            <div class="col">
+              <input type="number" step="0.0001" class="form-control" placeholder="East" name="crop_bbox4">
+            </div>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Export Options -->
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Export Options</legend>
+        <div class="form-group">
+          <label for="export">Export Format</label>
+          <select class="form-control" id="export" name="export">
+            <option value="preview">Preview</option>
+            <option value="stl">STL</option>
+            <option value="both" selected>Both</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="output-stl">Output STL Filename</label>
+          <input type="text" class="form-control" id="output-stl" name="output-stl" placeholder="Optional">
+        </div>
+        <div class="form-group form-check">
+          <input type="checkbox" class="form-check-input" id="no-repair" name="no-repair">
+          <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
+        </div>
+        <div class="form-group form-check">
+          <input type="checkbox" class="form-check-input" id="force" name="force">
+          <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
+        </div>
+      </fieldset>
+
+      <!-- Preview and Integration Options -->
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Preview &amp; Integration Options</legend>
+        <div class="form-group">
+          <label>Preview Image Size (Width, Height in pixels)</label>
+          <div class="form-row">
+            <div class="col">
+              <input type="number" class="form-control" placeholder="Width" name="preview-size-width" value="1920">
+            </div>
+            <div class="col">
+              <input type="number" class="form-control" placeholder="Height" name="preview-size-height" value="1080">
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="preview-file">Preview Image Filename</label>
+          <input type="text" class="form-control" id="preview-file" name="preview-file" placeholder="Optional">
+        </div>
+        <div class="form-group form-check">
+          <input type="checkbox" class="form-check-input" id="watch" name="watch">
+          <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
+        </div>
+        <div class="form-group">
+          <label for="openscad-path">OpenSCAD Executable Path</label>
+          <input type="text" class="form-control" id="openscad-path" name="openscad-path" placeholder="Optional">
+        </div>
+      </fieldset>
+
+      <button type="submit" class="btn btn-primary">Generate Model</button>
+    </form>
+  </div>
+</body>
+</html>
+
+```
+
+# views/result.ejs
+
+```ejs
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Generation Result</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1 class="mt-5">Generation Result</h1>
+    <p class="lead">The Shadow City model has been generated. Download the output files below:</p>
+    <ul class="list-group">
+      <li class="list-group-item">
+        <a href="<%= mainScad %>" download>Main Model (SCAD)</a>
+      </li>
+      <li class="list-group-item">
+        <a href="<%= frameScad %>" download>Frame Model (SCAD)</a>
+      </li>
+      <li class="list-group-item">
+        <a href="<%= logFile %>" download>Debug Log</a>
+      </li>
+    </ul>
+    <hr>
+    <h3>Process Output</h3>
+    <div class="card">
+      <div class="card-body">
+        <h5>Standard Output</h5>
+        <pre><%= stdout %></pre>
+        <h5>Error Output</h5>
+        <pre><%= stderr %></pre>
+      </div>
+    </div>
+    <a href="/" class="btn btn-secondary mt-3">Back to Home</a>
+  </div>
+</body>
+
+</html>
 ```
 

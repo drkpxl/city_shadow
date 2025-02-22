@@ -78,13 +78,12 @@ class OpenSCADIntegration:
         main_preview = output_image.replace(".png", "_main.png")
         command_main = [
             self.openscad_path,
+            "--backend=Manifold",
             "--preview=throwntogether",
             "--imgsize",
             f"{size[0]},{size[1]}",
             "--autocenter",
-            "--viewall",
             "--colorscheme=Nature",
-            "--projection=perspective",
             "-o",
             main_preview,
             main_scad_file,
@@ -94,6 +93,7 @@ class OpenSCADIntegration:
         frame_preview = output_image.replace(".png", "_frame.png")
         command_frame = [
             self.openscad_path,
+            "--backend=Manifold",
             "--preview=throwntogether",
             "--imgsize",
             f"{size[0]},{size[1]}",
