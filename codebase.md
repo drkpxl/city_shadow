@@ -19,8 +19,10 @@ codebase.md
 # geojson_to_shadow_city.py
 
 import argparse
+import time
 from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
+from lib.preview import OpenSCADIntegration
 
 def main():
     parser = argparse.ArgumentParser(
@@ -52,7 +54,7 @@ def main():
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug output')
 
-    # New preprocessing arguments
+    # Preprocessing arguments
     preprocess_group = parser.add_argument_group('Preprocessing options')
     preprocess_group.add_argument('--preprocess', action='store_true',
                                help='Enable GeoJSON preprocessing')
@@ -61,6 +63,19 @@ def main():
     preprocess_group.add_argument('--crop-bbox', type=float, nargs=4,
                                metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
                                help='Bounding box coordinates for cropping')
+
+    # New preview and integration arguments
+    preview_group = parser.add_argument_group('Preview and Integration')
+    preview_group.add_argument('--preview', action='store_true',
+                            help='Generate PNG preview of the model')
+    preview_group.add_argument('--preview-size', type=int, nargs=2, 
+                            metavar=('WIDTH', 'HEIGHT'),
+                            default=[800, 600],
+                            help='Preview image size in pixels')
+    preview_group.add_argument('--watch', action='store_true',
+                            help='Watch SCAD file and auto-reload in OpenSCAD')
+    preview_group.add_argument('--openscad-path',
+                            help='Path to OpenSCAD executable')
 
     args = parser.parse_args()
 
@@ -103,6 +118,36 @@ def main():
         else:
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
+
+        # Handle preview and integration features
+        if args.preview or args.watch:
+            try:
+                integration = OpenSCADIntegration(args.openscad_path)
+                
+                if args.preview:
+                    preview_file = args.output_scad.replace('.scad', '_preview.png')
+                    print(f"\nGenerating preview image: {preview_file}")
+                    integration.generate_preview(
+                        args.output_scad,
+                        preview_file,
+                        args.preview_size
+                    )
+                    
+                if args.watch:
+                    print("\nStarting OpenSCAD integration...")
+                    print("Press Ctrl+C to stop watching")
+                    integration.watch_and_reload(args.output_scad)
+                    try:
+                        while True:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        integration.stop_watching()
+                        print("\nStopped watching SCAD file")
+            
+            except Exception as e:
+                print(f"Warning: Preview/integration features failed: {e}")
+                if args.watch:
+                    print("Try opening OpenSCAD manually")
 
     except Exception as e:
         print(f"Error: {str(e)}")
@@ -693,6 +738,173 @@ if __name__ == '__main__':
     main()
 ```
 
+# lib/preview.py
+
+```py
+import subprocess
+import os
+import sys
+import tempfile
+import threading
+import time
+from PIL import Image, ImageEnhance
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class OpenSCADIntegration:
+    def __init__(self, openscad_path=None):
+        """Initialize OpenSCAD integration with an optional path to the OpenSCAD executable."""
+        self.openscad_path = openscad_path or self._find_openscad()
+        if not self.openscad_path:
+            raise RuntimeError("Could not find OpenSCAD executable")
+            
+        # For file watching
+        self.observer = None
+        self.watch_thread = None
+        self.running = False
+
+    def _find_openscad(self):
+        """Find the OpenSCAD executable based on the current platform."""
+        if sys.platform == "win32":
+            possible_paths = [
+                r"C:\Program Files\OpenSCAD\openscad.exe",
+                r"C:\Program Files (x86)\OpenSCAD\openscad.exe",
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+        elif sys.platform == "darwin":
+            possible_paths = [
+                "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
+                os.path.expanduser("~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"),
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+        else:  # Linux
+            try:
+                return subprocess.check_output(["which", "openscad"]).decode().strip()
+            except subprocess.CalledProcessError:
+                pass
+        return None
+
+    def generate_preview(self, output_file, output_image, size=(1920, 1080)):
+        """
+        Generate a PNG preview of the main SCAD file (output_main.scad) using a shell command.
+        
+        This method assumes that the conversion process produces two SCAD files:
+          - output_main.scad (the main 3D model)
+          - output_frame.scad (the decorative frame)
+          
+        It derives the main file by replacing '.scad' with '_main.scad' in the provided output_file.
+        """
+        # Derive the main SCAD file from the provided output file.
+        main_scad_file = output_file.replace('.scad', '_main.scad')
+        main_scad_file = os.path.abspath(main_scad_file)
+        output_image = os.path.abspath(output_image)
+        print("SCAD file path:", main_scad_file)
+        print("Output image path:", output_image)
+
+        # Set environment variable explicitly
+        env = os.environ.copy()
+        env["OPENSCAD_HEADLESS"] = "1"
+
+        # Build the command (adjust the image size if needed)
+        command = [
+            self.openscad_path,
+            '--render',
+            '--imgsize', f'{size[0]},{size[1]}',
+            '--autocenter',
+            '--colorscheme=Nature',
+            '-o', output_image,
+            main_scad_file
+        ]
+
+        print("Running command:", " ".join(command))
+        try:
+            result = subprocess.run(
+                command,
+                env=env,
+                cwd=os.path.dirname(main_scad_file),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            print("Subprocess stdout:", result.stdout)
+            print("Subprocess stderr:", result.stderr)
+            print(f"Preview image generated: {output_image}")
+        except subprocess.CalledProcessError as e:
+            print("Error generating preview:", e)
+            print("Subprocess stdout:", e.stdout)
+            print("Subprocess stderr:", e.stderr)
+
+    def watch_and_reload(self, scad_file):
+        """Watch the SCAD file and trigger a reload in OpenSCAD when it changes."""
+        if not self.openscad_path:
+            raise RuntimeError("OpenSCAD not found")
+
+        # First, open the file in OpenSCAD.
+        subprocess.Popen([self.openscad_path, scad_file])
+
+        # Set up file watching.
+        class SCDHandler(FileSystemEventHandler):
+            def __init__(self, scad_path):
+                self.scad_path = scad_path
+                self.last_reload = 0
+                self.reload_cooldown = 1.0  # seconds
+
+            def on_modified(self, event):
+                if event.src_path == self.scad_path:
+                    current_time = time.time()
+                    if current_time - self.last_reload >= self.reload_cooldown:
+                        if sys.platform == "win32":
+                            import win32gui
+                            import win32con
+                            def callback(hwnd, _):
+                                if "OpenSCAD" in win32gui.GetWindowText(hwnd):
+                                    win32gui.SetForegroundWindow(hwnd)
+                                    win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, win32con.VK_F5, 0)
+                            win32gui.EnumWindows(callback, None)
+                        elif sys.platform == "darwin":
+                            subprocess.run(["osascript", "-e", 
+                                'tell application "OpenSCAD" to activate\n' +
+                                'tell application "System Events"\n' +
+                                'keystroke "r" using {command down}\n' +
+                                'end tell'])
+                        else:  # Linux
+                            try:
+                                subprocess.run(["xdotool", "search", "--name", "OpenSCAD", 
+                                              "windowactivate", "--sync", "key", "F5"])
+                            except:
+                                print("Warning: xdotool not found. Auto-reload may not work on Linux.")
+                        self.last_reload = current_time
+
+        # Start watching the file.
+        self.running = True
+        event_handler = SCDHandler(os.path.abspath(scad_file))
+        self.observer = Observer()
+        self.observer.schedule(event_handler, os.path.dirname(scad_file), recursive=False)
+        self.observer.start()
+
+        def watch_thread():
+            while self.running:
+                time.sleep(1)
+            self.observer.stop()
+            self.observer.join()
+
+        self.watch_thread = threading.Thread(target=watch_thread)
+        self.watch_thread.start()
+
+    def stop_watching(self):
+        """Stop watching the SCAD file."""
+        if self.running:
+            self.running = False
+            if self.watch_thread:
+                self.watch_thread.join()
+                self.watch_thread = None
+
+```
+
 # lib/scad_generator.py
 
 ```py
@@ -903,7 +1115,7 @@ class StyleManager:
                 'depth': 2,
             },
             'roads': {
-                'depth': 1.4,
+                'depth': 1,
                 'width': 2.0,
             },
             'railways': {
@@ -1078,6 +1290,14 @@ class StyleManager:
         
         return hull
 ```
+
+# output_preview.png
+
+This is a binary file of the type: Image
+
+# output.png
+
+This is a binary file of the type: Image
 
 # output.scad.log
 
@@ -1310,14 +1530,126 @@ Creates a stark, minimalist view emphasizing urban layout and form.
 - Increase `--min-building-area`
 - Set `--merge-distance` to 0
 
+## Preview and OpenSCAD Integration
+
+The Shadow City Generator now includes features to streamline your workflow with OpenSCAD integration and preview generation.
+
+### Quick Preview
+Generate a PNG preview of your model without opening OpenSCAD:
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad --preview
+\`\`\`
+
+Customize preview size:
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad --preview --preview-size 1024 768
+\`\`\`
+
+### Auto-Reload Integration
+Watch for changes and automatically reload in OpenSCAD:
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad --watch
+\`\`\`
+
+### Combined Workflow
+Generate preview and enable auto-reload:
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad --preview --watch
+\`\`\`
+
+### Installation Requirements
+
+1. Install Python dependencies:
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
+
+2. Platform-specific requirements:
+
+#### Windows
+No additional requirements (uses pywin32, installed via requirements.txt)
+
+#### Linux
+Install xdotool for auto-reload functionality:
+\`\`\`bash
+sudo apt-get install xdotool  # Ubuntu/Debian
+sudo dnf install xdotool      # Fedora
+sudo pacman -S xdotool        # Arch Linux
+\`\`\`
+
+#### macOS
+No additional requirements (uses built-in osascript)
+
+### Custom OpenSCAD Path
+If OpenSCAD isn't found automatically, specify its path:
+\`\`\`bash
+python geojson_to_shadow_city.py input.geojson output.scad --openscad-path "/path/to/openscad"
+\`\`\`
+
+### Workflow Tips
+
+1. **Development Workflow**
+   \`\`\`bash
+   python geojson_to_shadow_city.py input.geojson output.scad --watch
+   \`\`\`
+   - Make changes to parameters
+   - See updates automatically in OpenSCAD
+   - Press Ctrl+C when done
+
+2. **Quick Iterations**
+   \`\`\`bash
+   python geojson_to_shadow_city.py input.geojson output.scad --preview
+   \`\`\`
+   - Quickly preview changes without opening OpenSCAD
+   - Great for rapid parameter testing
+
+3. **Production Workflow**
+   \`\`\`bash
+   python geojson_to_shadow_city.py input.geojson output.scad --preview --preview-size 1920 1080
+   \`\`\`
+   - Generate high-resolution previews
+   - Perfect for documentation or sharing designs
+\`\`\`
+
+### 5. Installation Steps
+
+1. Install the new Python requirements:
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
+
+2. Create the new `lib/preview.py` file with the content shown above
+
+3. Update `geojson_to_shadow_city.py` with the new content
+
+4. Update README.md with the new section
+
+5. Platform-specific setup:
+   - Windows: No additional steps needed
+   - Linux: Install xdotool using package manager
+   - macOS: No additional steps needed
+
+The integration now provides:
+- Automatic preview generation
+- Auto-reload functionality
+- Cross-platform support
+- High-resolution preview options
+- Streamlined development workflow
 ```
 
 # requirements.txt
 
 ```txt
-# requirements.txt
+# Core requirements
 argparse>=1.4.0
 math>=3.8.0
 json>=2.0.9
+
+# Requirements for preview and integration
+Pillow>=9.0.0  # For image handling
+watchdog>=2.1.0  # For file watching
+# Platform-specific requirements (comment out what you don't need):
+pywin32>=228; sys_platform == 'win32'  # For Windows auto-reload
+# Note: Linux requires xdotool (install via package manager)
 ```
 

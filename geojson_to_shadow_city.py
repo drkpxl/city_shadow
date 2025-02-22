@@ -1,5 +1,4 @@
-# geojson_to_shadow_city.py
-
+#!/usr/bin/env python3
 import argparse
 import time
 from lib.converter import EnhancedCityConverter
@@ -10,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Convert GeoJSON to artistic 3D city model'
     )
-    # Existing arguments
+    # Basic arguments
     parser.add_argument('input_json', help='Input GeoJSON file')
     parser.add_argument('output_scad', help='Output OpenSCAD file')
     parser.add_argument('--size', type=float, default=200,
@@ -46,14 +45,25 @@ def main():
                                metavar=('SOUTH', 'WEST', 'NORTH', 'EAST'),
                                help='Bounding box coordinates for cropping')
 
-    # New preview and integration arguments
+    # Export format group
+    export_group = parser.add_argument_group('Export Options')
+    export_group.add_argument('--export', choices=['preview', 'stl', 'both'],
+                          help='Export format (preview image, STL, or both)')
+    export_group.add_argument('--output-stl',
+                          help='Output STL filename (default: based on SCAD filename)')
+    export_group.add_argument('--no-repair', action='store_true',
+                          help='Disable automatic geometry repair attempts')
+    export_group.add_argument('--force', action='store_true',
+                          help='Force STL generation even if validation fails')
+    
+    # Preview options
     preview_group = parser.add_argument_group('Preview and Integration')
-    preview_group.add_argument('--preview', action='store_true',
-                            help='Generate PNG preview of the model')
     preview_group.add_argument('--preview-size', type=int, nargs=2, 
                             metavar=('WIDTH', 'HEIGHT'),
-                            default=[800, 600],
+                            default=[1920, 1080],
                             help='Preview image size in pixels')
+    preview_group.add_argument('--preview-file',
+                            help='Preview image filename (default: based on SCAD filename)')
     preview_group.add_argument('--watch', action='store_true',
                             help='Watch SCAD file and auto-reload in OpenSCAD')
     preview_group.add_argument('--openscad-path',
@@ -101,35 +111,52 @@ def main():
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
 
-        # Handle preview and integration features
-        if args.preview or args.watch:
-            try:
-                integration = OpenSCADIntegration(args.openscad_path)
-                
-                if args.preview:
-                    preview_file = args.output_scad.replace('.scad', '_preview.png')
-                    print(f"\nGenerating preview image: {preview_file}")
-                    integration.generate_preview(
-                        args.output_scad,
-                        preview_file,
-                        args.preview_size
-                    )
-                    
-                if args.watch:
-                    print("\nStarting OpenSCAD integration...")
-                    print("Press Ctrl+C to stop watching")
-                    integration.watch_and_reload(args.output_scad)
-                    try:
-                        while True:
-                            time.sleep(1)
-                    except KeyboardInterrupt:
-                        integration.stop_watching()
-                        print("\nStopped watching SCAD file")
+        # Handle exports if requested
+        if args.export or args.watch:
+            integration = OpenSCADIntegration(args.openscad_path)
             
-            except Exception as e:
-                print(f"Warning: Preview/integration features failed: {e}")
-                if args.watch:
-                    print("Try opening OpenSCAD manually")
+            # Determine output filenames
+            stl_file = args.output_stl or args.output_scad.replace('.scad', '.stl')
+            preview_file = args.preview_file or args.output_scad.replace('.scad', '_preview.png')
+
+            if args.export in ['preview', 'both']:
+                print("\nGenerating preview image...")
+                integration.generate_preview(
+                    args.output_scad,
+                    preview_file,
+                    size=args.preview_size
+                )
+
+            if args.export in ['stl', 'both']:
+                print("\nGenerating STL file...")
+                try:
+                    integration.generate_stl(
+                        args.output_scad,
+                        stl_file,
+                        repair=not args.no_repair
+                    )
+                except Exception as e:
+                    if args.force:
+                        print(f"Warning: {str(e)}")
+                        print("Forcing STL generation due to --force flag...")
+                        integration.generate_stl(
+                            args.output_scad,
+                            stl_file,
+                            repair=False
+                        )
+                    else:
+                        raise
+
+            if args.watch:
+                print("\nStarting OpenSCAD integration...")
+                print("Press Ctrl+C to stop watching")
+                integration.watch_and_reload(args.output_scad)
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    integration.stop_watching()
+                    print("\nStopped watching SCAD file")
 
     except Exception as e:
         print(f"Error: {str(e)}")
