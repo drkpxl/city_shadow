@@ -12,6 +12,31 @@ This creates:
 - `output_main.scad` - The city model
 - `output_frame.scad` - A decorative frame that fits around the model
 
+## Preprocessing Options
+
+The Shadow City Generator includes preprocessing capabilities to help you refine your input data before generating the 3D model. This is particularly useful when working with large OpenStreetMap exports or when you want to focus on a specific area.
+
+### Basic Preprocessing
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad --preprocess [options]
+```
+
+### Distance-Based Cropping
+Crop features to a specific radius from the center point:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad \
+  --preprocess \
+  --crop-distance 1000  # Crop to 1000 meters from center
+```
+
+### Bounding Box Cropping
+Crop features to a specific geographic area:
+```bash
+python geojson_to_shadow_city.py input.geojson output.scad \
+  --preprocess \
+  --crop-bbox 51.5074 -0.1278 51.5174 -0.1178  # south west north east
+```
+
 ## Artistic Options
 
 ### Overall Style
@@ -87,31 +112,35 @@ This adds personality to your buildings' heights:
 ```
 Controls how building clusters are formed when merging nearby structures.
 
-## Creative Styles
+## Creative Examples
 
-### Contemporary Urban Center
+### Contemporary Downtown with Focused Area
 ```bash
 python geojson_to_shadow_city.py input.geojson output.scad \
+  --preprocess \
+  --crop-distance 800 \
   --style modern \
   --detail 0.5 \
   --merge-distance 0 \
   --min-building-area 1000 \
   --road-width 1.5
 ```
-Creates a sleek, modern cityscape with distinct buildings and clean lines.
+Creates a sleek, modern cityscape focusing on an 800-meter radius from the center.
 
-### Historic District
+### Historic District Section
 ```bash
 python geojson_to_shadow_city.py input.geojson output.scad \
+  --preprocess \
+  --crop-bbox 51.5074 -0.1278 51.5174 -0.1178 \
   --style classic \
   --detail 1.5 \
   --merge-distance 3 \
   --min-building-area 400 \
   --height-variance 0.3
 ```
-Produces an organic feel with clustered buildings and traditional architectural details.
+Produces an organic feel with clustered buildings and traditional architectural details within a specific area.
 
-### Abstract City Plan
+### Minimalist Urban Plan
 ```bash
 python geojson_to_shadow_city.py input.geojson output.scad \
   --style minimal \
@@ -130,6 +159,30 @@ Creates a stark, minimalist view emphasizing urban layout and form.
    - Layer height: 0.2mm for good detail
    - Consider different colors for frame and city
    - Frame often looks best in white or a contrasting color
+
+## Workflow Tips
+
+### For Large City Areas
+1. Export your area from OpenStreetMap using Overpass Turbo
+2. Use preprocessing to focus on your area of interest:
+   ```bash
+   python geojson_to_shadow_city.py input.geojson output.scad \
+     --preprocess --crop-distance 1000
+   ```
+3. Adjust artistic settings and preview in OpenSCAD
+4. Iterate until you achieve the desired look
+5. Slice and print
+
+### For Specific Districts
+1. Export a larger area from OpenStreetMap
+2. Use bounding box preprocessing to isolate your district:
+   ```bash
+   python geojson_to_shadow_city.py input.geojson output.scad \
+     --preprocess --crop-bbox SOUTH WEST NORTH EAST
+   ```
+3. Fine-tune artistic settings
+4. Preview and adjust as needed
+5. Slice and print
 
 ## Artistic Adjustments
 
