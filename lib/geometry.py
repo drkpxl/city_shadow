@@ -2,8 +2,8 @@
 from math import sqrt, sin, cos, pi, atan2, radians
 
 class GeometryUtils:
-    def create_coordinate_transformer(self, features, border_width, size):
-        """Create a coordinate transformation function"""
+    def create_coordinate_transformer(self, features, size):
+        """Create a coordinate transformation function without border inset"""
         all_coords = []
         for feature in features:
             coords = self.extract_coordinates(feature)
@@ -17,14 +17,10 @@ class GeometryUtils:
         min_lon, max_lon = min(lons), max(lons)
         min_lat, max_lat = min(lats), max(lats)
         
-        available_size = size - 2 * border_width
-        
         def transform(lon, lat):
             x = (lon - min_lon) / (max_lon - min_lon) if (max_lon != min_lon) else 0.5
             y = (lat - min_lat) / (max_lat - min_lat) if (max_lat != min_lat) else 0.5
-            final_x = border_width + (x * available_size)
-            final_y = border_width + (y * available_size)
-            return [final_x, final_y]
+            return [x * size, y * size]
 
         return transform
 

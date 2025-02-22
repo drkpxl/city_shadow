@@ -50,7 +50,7 @@ def main():
         'merge_distance': args.merge_distance,
         'cluster_size': args.cluster_size,
         'height_variance': args.height_variance,
-        'min_building_area': args.min_building_area  # NEW setting
+        'min_building_area': args.min_building_area
     }
     
     converter = EnhancedCityConverter(
@@ -117,20 +117,26 @@ class EnhancedCityConverter:
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
             
-            # Generate OpenSCAD code
+            # Generate main model SCAD code
             self.print_debug("\nGenerating OpenSCAD code...")
-            scad_code = self.scad_generator.generate_openscad(
+            main_scad = self.scad_generator.generate_openscad(
                 features, 
                 self.size, 
                 self.layer_specs
             )
             
+            # Generate frame SCAD code using the helper method
+            frame_scad = self._generate_frame(self.size, self.max_height)
+            
+            # Combine main model and frame in a union block
+            final_scad = f"union() {{\n{main_scad}\n{frame_scad}\n}}"
+            
             # Write output
             with open(output_file, 'w') as f:
-                f.write(scad_code)
+                f.write(final_scad)
             
             self.print_debug(f"\nSuccessfully created {output_file}")
-            self.print_debug(f"Style settings used:")
+            self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
             
@@ -144,11 +150,31 @@ class EnhancedCityConverter:
         except Exception as e:
             print(f"Error: {str(e)}")
             raise
+
+    def _generate_frame(self, size, height):
+        """
+        Generate a frame around the entire [0,0] to [size,size] area.
+        The data is already inset 5mm on each side, so the 'inner' region is [5,5] → [size-5,size-5].
+        We make a difference of two cubes to produce a 5mm frame.
+        """
+        return f"""
+    // Frame around the model
+    difference() {{
+        // Outer block: [0,0,0] to [size, size, height]
+        cube([{size}, {size}, {height}]);
+        // Subtract the inner region: shift by [5,5], then [size-10, size-10] wide
+        translate([5, 5, 0])
+            cube([{size-10}, {size-10}, {height}]);
+    }}
+    """
+
+
 ```
 
 # lib/feature_processor.py
 
 ```py
+# lib/feature_processor.py
 from .geometry import GeometryUtils
 
 class FeatureProcessor:
@@ -175,7 +201,7 @@ class FeatureProcessor:
         for feature in geojson_data['features']:
             self._process_single_feature(feature, features, transform)
         
-        # Apply building enhancements
+        # Apply building merging/clustering
         features['buildings'] = self.style_manager.merge_nearby_buildings(features['buildings'])
         
         return features
@@ -187,15 +213,13 @@ class FeatureProcessor:
         if not coords:
             return
             
-        # If this is a building, check its real-world area:
+        # If this is a building, check area:
         if 'building' in props:
             area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-            # Retrieve the minimum area threshold from style settings
             min_area = self.style_manager.style.get('min_building_area', 600.0)
             
             if area_m2 < min_area:
-                # Skip buildings smaller than the threshold
-                return
+                return  # skip small buildings
             
             # Otherwise, transform coordinates and store the building
             transformed = [transform(lon, lat) for lon, lat in coords]
@@ -204,7 +228,7 @@ class FeatureProcessor:
                 'coords': transformed,
                 'height': height
             })
-        # Handle parking features explicitly:
+        # Handle parking features explicitly
         elif props.get('amenity') == 'parking' or props.get('parking') == 'surface' or props.get('service') == 'parking_aisle':
             transformed = [transform(lon, lat) for lon, lat in coords]
             features['roads'].append({
@@ -229,6 +253,7 @@ class FeatureProcessor:
 # lib/geometry.py
 
 ```py
+# lib/geometry.py
 from math import sqrt, sin, cos, pi, atan2, radians
 
 class GeometryUtils:
@@ -242,7 +267,7 @@ class GeometryUtils:
         if not all_coords:
             return lambda lon, lat: [size/2, size/2]
 
-        # Calculate bounds and create transformer
+        # Calculate bounds
         lons, lats = zip(*all_coords)
         min_lon, max_lon = min(lons), max(lons)
         min_lat, max_lat = min(lats), max(lats)
@@ -250,8 +275,8 @@ class GeometryUtils:
         available_size = size - 2 * border_width
         
         def transform(lon, lat):
-            x = (lon - min_lon) / (max_lon - min_lon)
-            y = (lat - min_lat) / (max_lat - min_lat)
+            x = (lon - min_lon) / (max_lon - min_lon) if (max_lon != min_lon) else 0.5
+            y = (lat - min_lat) / (max_lat - min_lat) if (max_lat != min_lat) else 0.5
             final_x = border_width + (x * available_size)
             final_y = border_width + (y * available_size)
             return [final_x, final_y]
@@ -286,7 +311,7 @@ class GeometryUtils:
         return sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
     def calculate_polygon_area(self, points):
-        """Calculate area of a polygon using the shoelace formula on transformed coordinates"""
+        """Calculate area using the shoelace formula on transformed coordinates"""
         area = 0.0
         j = len(points) - 1
         for i in range(len(points)):
@@ -298,10 +323,8 @@ class GeometryUtils:
         """Generate polygon points string for OpenSCAD"""
         if len(points) < 3:
             return None
-            
         if points[0] != points[-1]:
             points = points + [points[0]]
-            
         return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in points)
 
     def generate_buffered_polygon(self, points, width):
@@ -317,7 +340,6 @@ class GeometryUtils:
             dx = p2[0] - p1[0]
             dy = p2[1] - p1[1]
             length = sqrt(dx*dx + dy*dy)
-            
             if length < 0.001:
                 continue
                 
@@ -338,14 +360,11 @@ class GeometryUtils:
         return ', '.join(f'[{p[0]:.3f}, {p[1]:.3f}]' for p in polygon_points)
 
     def approximate_polygon_area_m2(self, coords):
-        """
-        Approximate the area of a lat/lon polygon in square meters
-        using a simple equirectangular projection and the shoelace formula.
-        """
+        """Approximate the area of a lat/lon polygon in square meters"""
         if len(coords) < 3:
             return 0.0
         
-        # Calculate the center for projection
+        # Center for projection
         lons = [pt[0] for pt in coords]
         lats = [pt[1] for pt in coords]
         lon_center = sum(lons) / len(lons)
@@ -353,14 +372,14 @@ class GeometryUtils:
         
         R = 6371000.0  # Earth radius in meters
         
-        # Convert each coordinate to x, y relative to the center
+        # Convert each coordinate to x, y relative to center
         xy_points = []
         for lon, lat in coords:
             x = radians(lon - lon_center) * R * cos(radians(lat_center))
             y = radians(lat - lat_center) * R
             xy_points.append((x, y))
         
-        # Calculate area using the shoelace formula
+        # Shoelace formula
         area = 0.0
         n = len(xy_points)
         for i in range(n):
@@ -443,7 +462,6 @@ union() {{
         road_width = layer_specs['roads']['width']
         
         for i, road in enumerate(road_features):
-            # Ensure we have a list of coordinates regardless of type
             if isinstance(road, dict):
                 pts = road.get('coords', road)
                 if road.get('is_parking'):
@@ -549,17 +567,20 @@ union() {{
                 linear_extrude(height={height}, convexity=2)
                     polygon([{points_str}]);'''
 
+
 ```
 
 # lib/style_manager.py
 
 ```py
+# lib/style_manager.py
 from math import log10, sin, cos, pi, atan2
 from .geometry import GeometryUtils
 
 class StyleManager:
     def __init__(self, style_settings=None):
-        self.border_width = 0
+        # CHANGED: we now use 5 mm to create an inset around the data
+        self.border_width = 5
         self.base_height = 10
         self.geometry = GeometryUtils()
         
@@ -570,7 +591,7 @@ class StyleManager:
             'height_variance': 0.2,
             'detail_level': 1.0,
             'artistic_style': 'modern',
-            'min_building_area': 600.0  # NEW: default minimum area in m²
+            'min_building_area': 600.0
         }
         
         # Override defaults with provided settings
@@ -630,6 +651,7 @@ class StyleManager:
         min_height = self.get_default_layer_specs()['buildings']['min_height']
         max_height = self.get_default_layer_specs()['buildings']['max_height']
         
+        from math import log10
         log_height = log10(height_m + 1)
         log_min = log10(1)
         log_max = log10(101)
@@ -702,12 +724,13 @@ class StyleManager:
         }
 
     def _add_artistic_variation(self, coords):
-        """Add variations to building coordinates based on artistic style"""
+        """Add variations to building coords based on style"""
         varied = []
         variance = self.style['height_variance']
         
         if self.style['artistic_style'] == 'modern':
             # Add angular variations
+            from math import sin, pi
             for i, coord in enumerate(coords):
                 x, y = coord
                 offset = variance * sin(i * pi / len(coords))
@@ -715,6 +738,7 @@ class StyleManager:
         
         elif self.style['artistic_style'] == 'classic':
             # Add curved variations
+            from math import sin, cos, pi
             for i, coord in enumerate(coords):
                 x, y = coord
                 angle = 2 * pi * i / len(coords)
@@ -732,6 +756,7 @@ class StyleManager:
         if len(points) < 3:
             return points
             
+        from math import atan2, pi, sin
         center = self.geometry.calculate_centroid(points)
         sorted_points = sorted(points, 
             key=lambda p: atan2(p[1] - center[1], p[0] - center[0]))

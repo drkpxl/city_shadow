@@ -25,7 +25,7 @@ class EnhancedCityConverter:
             self.debug_log.append(message)
 
     def convert(self, input_file, output_file):
-        """Convert GeoJSON to OpenSCAD file"""
+        """Convert GeoJSON to separate OpenSCAD files for main model and frame"""
         try:
             # Read input file
             with open(input_file) as f:
@@ -36,24 +36,31 @@ class EnhancedCityConverter:
             features = self.feature_processor.process_features(data, self.size)
             
             # Generate main model SCAD code
-            self.print_debug("\nGenerating OpenSCAD code...")
+            self.print_debug("\nGenerating main model OpenSCAD code...")
             main_scad = self.scad_generator.generate_openscad(
                 features, 
                 self.size, 
                 self.layer_specs
             )
             
-            # Generate frame SCAD code using the helper method
+            # Generate frame SCAD code
+            self.print_debug("\nGenerating frame OpenSCAD code...")
             frame_scad = self._generate_frame(self.size, self.max_height)
             
-            # Combine main model and frame in a union block
-            final_scad = f"union() {{\n{main_scad}\n{frame_scad}\n}}"
+            # Determine output filenames
+            main_file = output_file.replace('.scad', '_main.scad')
+            frame_file = output_file.replace('.scad', '_frame.scad')
             
-            # Write output
-            with open(output_file, 'w') as f:
-                f.write(final_scad)
+            # Write main model
+            with open(main_file, 'w') as f:
+                f.write(main_scad)
             
-            self.print_debug(f"\nSuccessfully created {output_file}")
+            # Write frame
+            with open(frame_file, 'w') as f:
+                f.write(frame_scad)
+            
+            self.print_debug(f"\nSuccessfully created main model: {main_file}")
+            self.print_debug(f"Successfully created frame: {frame_file}")
             self.print_debug("Style settings used:")
             for key, value in self.style_manager.style.items():
                 self.print_debug(f"  {key}: {value}")
@@ -71,18 +78,21 @@ class EnhancedCityConverter:
 
     def _generate_frame(self, size, height):
         """
-        Generate a frame around the entire [0,0] to [size,size] area.
-        The data is already inset 5mm on each side, so the 'inner' region is [5,5] → [size-5,size-5].
-        We make a difference of two cubes to produce a 5mm frame.
+        Generate a frame that will fit around the main model.
+        The frame's inner dimensions match the main model size exactly,
+        with a 5mm border around all sides.
         """
-        return f"""
-    // Frame around the model
-    difference() {{
-        // Outer block: [0,0,0] to [size, size, height]
-        cube([{size}, {size}, {height}]);
-        // Subtract the inner region: shift by [5,5], then [size-10, size-10] wide
-        translate([5, 5, 0])
-            cube([{size-10}, {size-10}, {height}]);
-    }}
-    """
+        frame_size = size + 10  # Add 10mm to total size (5mm on each side)
+        return f"""// Frame for city model
+// Outer size: {frame_size}mm x {frame_size}mm x {height}mm
+// Inner size: {size}mm x {size}mm x {height}mm
+// Frame width: 5mm
 
+difference() {{
+    // Outer block (10mm larger than main model)
+    cube([{frame_size}, {frame_size}, {height}]);
+    
+    // Inner cutout (sized to match main model exactly)
+    translate([5, 5, 0])
+        cube([{size}, {size}, {height}]);
+}}"""

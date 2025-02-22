@@ -4,9 +4,6 @@ from .geometry import GeometryUtils
 
 class StyleManager:
     def __init__(self, style_settings=None):
-        # CHANGED: we now use 5 mm to create an inset around the data
-        self.border_width = 5
-        self.base_height = 10
         self.geometry = GeometryUtils()
         
         # Default style settings
@@ -24,35 +21,27 @@ class StyleManager:
             self.style.update(style_settings)
 
     def get_default_layer_specs(self):
-        """Get default layer specifications"""
+        """Get default layer specifications without border insets"""
         return {
             'water': {
                 'depth': 2,
-                'inset': self.border_width
             },
             'roads': {
                 'depth': 1.4,
                 'width': 2.0,
-                'inset': self.border_width
             },
             'railways': {
                 'depth': 1.4,
                 'width': 1.5,
-                'inset': self.border_width
             },
             'buildings': {
                 'min_height': 2,
                 'max_height': 6
             },
             'base': {
-                'height': self.base_height,
-                'inset': self.border_width
+                'height': 10,  # Base height of 10mm
             }
         }
-
-    def get_border_width(self):
-        """Get border width setting"""
-        return self.border_width
 
     def scale_building_height(self, properties):
         """Scale building height using log scaling"""
@@ -76,7 +65,6 @@ class StyleManager:
         min_height = self.get_default_layer_specs()['buildings']['min_height']
         max_height = self.get_default_layer_specs()['buildings']['max_height']
         
-        from math import log10
         log_height = log10(height_m + 1)
         log_min = log10(1)
         log_max = log10(101)
@@ -88,6 +76,10 @@ class StyleManager:
 
     def merge_nearby_buildings(self, buildings):
         """Merge buildings that are close to each other into clusters"""
+        # If merge_distance is 0, skip merging entirely
+        if self.style['merge_distance'] <= 0:
+            return buildings
+            
         clusters = []
         processed = set()
         

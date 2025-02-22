@@ -7,7 +7,7 @@ class ScadGenerator:
         self.geometry = GeometryUtils()
 
     def generate_openscad(self, features, size, layer_specs):
-        """Generate complete OpenSCAD code with all features"""
+        """Generate complete OpenSCAD code for main model without frame"""
         # Start with header and base
         scad = self._generate_header(size, layer_specs)
         
@@ -30,6 +30,7 @@ class ScadGenerator:
 // Style: {self.style_manager.style['artistic_style']}
 // Detail Level: {self.style_manager.style['detail_level']}
 
+// Main city model without frame
 union() {{
     difference() {{
         // Base
@@ -170,4 +171,3 @@ union() {{
             return f'''
                 linear_extrude(height={height}, convexity=2)
                     polygon([{points_str}]);'''
-

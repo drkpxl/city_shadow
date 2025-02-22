@@ -10,7 +10,6 @@ class FeatureProcessor:
         """Process and enhance GeoJSON features"""
         transform = self.geometry.create_coordinate_transformer(
             geojson_data['features'],
-            self.style_manager.get_border_width(),
             size
         )
         
