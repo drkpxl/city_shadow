@@ -28,8 +28,8 @@ class StyleManager:
                 "depth": 2.4,
             },
             "roads": {
-                "depth": 1.6,
-                "width": 2.0,
+                "depth": 3,
+                "width": 4.0,
             },
             "railways": {
                 "depth": 1.2,
