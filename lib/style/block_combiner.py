@@ -103,11 +103,12 @@ class BlockCombiner:
                         centroid_cluster = cluster_union.centroid
                         centroid_candidate = candidate['polygon'].centroid
                         if not self._is_blocked((centroid_cluster.x, centroid_cluster.y),
-                                                 (centroid_candidate.x, centroid_candidate.y),
-                                                 barrier_union):
+                                                (centroid_candidate.x, centroid_candidate.y),
+                                                barrier_union):
                             cluster.append(candidate)
                             visited.add(j)
-                            cluster_union = cluster_union.union(candidate['polygon'])
+                            cluster_union = unary_union([cluster_union, candidate['polygon']])
+                            cluster_union = make_valid(cluster_union)  # Ensure valid polygon
                             total_area += candidate['area']
                             weighted_height += candidate.get('height', 10.0) * candidate['area']
                             growing = True
@@ -143,12 +144,11 @@ class BlockCombiner:
         if self.debug:
             print(f"Area-based merge: {len(large_buildings)} large buildings, {len(merged_clusters)} merged clusters.")
         return large_buildings + merged_clusters
-
     def _legacy_combine(self, features):
         """
         Legacy block subdivision approach.
         (This is the original method that divides the map into blocks,
-         finds footprints in each block, and processes them.)
+        finds footprints in each block, and processes them.)
         """
         if self.debug:
             print("\n=== Legacy Block Combiner Debug ===")
@@ -171,9 +171,9 @@ class BlockCombiner:
         """
         Collect all building/industrial footprints into a unified list.
         Each entry is a dict with keys:
-          - 'polygon': a valid shapely Polygon,
-          - 'height': building height (default 10.0 for buildings, 15.0 for industrial),
-          - 'area': computed area of the polygon.
+        - 'polygon': a valid shapely Polygon,
+        - 'height': building height (default 10.0 for buildings, 15.0 for industrial),
+        - 'area': computed area of the polygon.
         """
         from shapely.geometry import Polygon
         from shapely.validation import make_valid
