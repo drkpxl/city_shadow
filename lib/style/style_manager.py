@@ -30,8 +30,8 @@ class StyleManager:
         """Get default layer specifications."""
         return {
             "water": {"depth": 3},
-            "roads": {"depth": 1.6, "width": 2.0},
-            "railways": {"depth": 1.2, "width": 1.5},
+            "roads": {"depth": 0.4, "width": 2.0},
+            "railways": {"depth": 0.6, "width": 1.5},
             "buildings": {"min_height": 2, "max_height": 6},
             "base": {"height": 10},
         }
