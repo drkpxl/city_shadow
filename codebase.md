@@ -34,7 +34,7 @@ def main():
     parser.add_argument("input_json", help="Input GeoJSON file")
     parser.add_argument("output_scad", help="Output OpenSCAD file")
     parser.add_argument(
-        "--size", type=float, default=200, help="Size in mm (default: 200)"
+        "--size", type=float, default=150, help="Size in mm (default: 200)"
     )
     parser.add_argument(
         "--height", type=float, default=20, help="Maximum height in mm (default: 20)"
@@ -69,13 +69,13 @@ def main():
     parser.add_argument(
         "--road-width",
         type=float,
-        default=2.0,
+        default=1.2,
         help="Width of roads in mm (default: 2.0)",
     )
     parser.add_argument(
         "--water-depth",
         type=float,
-        default=1.4,
+        default=2,
         help="Depth of water features in mm (default: 1.4)",
     )
     parser.add_argument(
@@ -96,7 +96,7 @@ def main():
     parser.add_argument(
         "--bridge-thickness",
         type=float,
-        default=1.0,
+        default=0.6,
         help="Bridge deck thickness (default: 1.0)",
     )
     parser.add_argument(
@@ -1874,7 +1874,7 @@ class StyleManager:
             "height_variance": 0.2,
             "detail_level": 1.0,
             "artistic_style": "modern",
-            "min_building_area": 600.0,
+            "min_building_area": 300.0,
         }
 
         # Override defaults with provided settings
@@ -2260,7 +2260,7 @@ class BlockCombiner:
         
         merged_clusters = []
         visited = set()
-        merge_dist = self.style_manager.style.get("merge_distance", 2.0)
+        merge_dist = self.style_manager.style.get("merge_distance", 5.0)
         
         for i, fp in enumerate(small):
             if i in visited:
@@ -2281,11 +2281,12 @@ class BlockCombiner:
                         centroid_cluster = cluster_union.centroid
                         centroid_candidate = candidate['polygon'].centroid
                         if not self._is_blocked((centroid_cluster.x, centroid_cluster.y),
-                                                 (centroid_candidate.x, centroid_candidate.y),
-                                                 barrier_union):
+                                                (centroid_candidate.x, centroid_candidate.y),
+                                                barrier_union):
                             cluster.append(candidate)
                             visited.add(j)
-                            cluster_union = cluster_union.union(candidate['polygon'])
+                            cluster_union = unary_union([cluster_union, candidate['polygon']])
+                            cluster_union = make_valid(cluster_union)  # Ensure valid polygon
                             total_area += candidate['area']
                             weighted_height += candidate.get('height', 10.0) * candidate['area']
                             growing = True
@@ -2321,12 +2322,11 @@ class BlockCombiner:
         if self.debug:
             print(f"Area-based merge: {len(large_buildings)} large buildings, {len(merged_clusters)} merged clusters.")
         return large_buildings + merged_clusters
-
     def _legacy_combine(self, features):
         """
         Legacy block subdivision approach.
         (This is the original method that divides the map into blocks,
-         finds footprints in each block, and processes them.)
+        finds footprints in each block, and processes them.)
         """
         if self.debug:
             print("\n=== Legacy Block Combiner Debug ===")
@@ -2349,9 +2349,9 @@ class BlockCombiner:
         """
         Collect all building/industrial footprints into a unified list.
         Each entry is a dict with keys:
-          - 'polygon': a valid shapely Polygon,
-          - 'height': building height (default 10.0 for buildings, 15.0 for industrial),
-          - 'area': computed area of the polygon.
+        - 'polygon': a valid shapely Polygon,
+        - 'height': building height (default 10.0 for buildings, 15.0 for industrial),
+        - 'area': computed area of the polygon.
         """
         from shapely.geometry import Polygon
         from shapely.validation import make_valid
@@ -3725,8 +3725,8 @@ app.listen(port, () => {
       padding: 10px;
       border-radius: 5px;
       min-height: 100px;
-      max-height: 300px;
-      overflow-y: auto;
+      max-height: 600px;
+      overflow-y: scroll;
       font-family: monospace;
       white-space: pre;
     }
@@ -3790,10 +3790,10 @@ app.listen(port, () => {
             <div class="form-group">
               <label for="style">Artistic Style</label>
               <select class="form-control live-preview" id="style" name="style">
-                <option value="modern" selected>Modern</option>
+                <option value="modern">Modern</option>
                 <option value="classic">Classic</option>
                 <option value="minimal">Minimal</option>
-                <option value="block-combine">Block Combine</option>
+                <option value="block-combine" selected>Block Combine</option>
               </select>
             </div>
             <div class="form-group">
@@ -3931,11 +3931,11 @@ app.listen(port, () => {
           <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
         </div>
 
-        <div class="preview-container">
+        <!--      <div class="preview-container">
           <h3>Live Preview - Frame Model</h3>
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
-
+      -->
         <div class="log-container">
           <h4>Live Log</h4>
           <div id="liveLog"></div>

@@ -1,9 +1,17 @@
 output.scad
-*.geojson
-*.scad
+_.geojson
+_.scad
 SL_export_clipped.geojson
-*.stl
+\*.stl
 Regions/
 
 outputs/
+uploads/
 node_modules/
+
+# Exclude web
+
+server.js
+views/
+package-lock.json
+package.json

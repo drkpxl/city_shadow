@@ -11,10 +11,12 @@ class BlockCombiner:
     
     For styles other than "block-combine", it uses the legacy block subdivision logic.
     For "block-combine" style, it performs area-based merging:
-      1. If a footprint’s area is >= 1000 m², it is left unmerged.
+      1. If a footprint’s area is >= a threshold, it is left unmerged.
       2. If it is smaller, it is merged with nearby unblocked footprints until the
-         unioned polygon’s area is at least 1000 m².
-      3. If the merged union is a MultiPolygon, the largest polygon is used.
+         unioned polygon’s area reaches that threshold.
+      3. If the merged union is a MultiPolygon (i.e. separate pieces), we artificially
+         expand (buffer) them by 50% of the merge distance and then contract back to force
+         a merge. If they still remain disjoint, we take their union and, if needed, their convex hull.
       4. A random roof style is assigned to merged clusters.
     """
     def __init__(self, style_manager):
@@ -68,11 +70,14 @@ class BlockCombiner:
         """
         Implements area-based merging.
         Gather footprints from buildings and industrial features.
-        Any footprint with area >= 1000 m² is left alone.
-        Otherwise, small footprints (area < 1000) are merged iteratively
-        (if within merge_distance and not blocked) until the unioned area reaches 1000 m².
+        Any footprint with area >= AREA_THRESHOLD is left unmerged.
+        Otherwise, small footprints (area < AREA_THRESHOLD) are merged iteratively
+        (if within merge_distance and not blocked) until the unioned area reaches the threshold.
+        If the union is a MultiPolygon, we artificially expand it (buffer by half the merge distance)
+        and then contract (buffer negative) to force the sub-polygons to merge.
+        If it still remains a MultiPolygon, we perform a union and fall back to the convex hull.
         """
-        AREA_THRESHOLD = 1000  # in m²
+        AREA_THRESHOLD = 500  # in m²; adjust as needed
         footprints = self._gather_all_footprints(features)
         barrier_union = self._create_barrier_union(features)
         
@@ -82,7 +87,7 @@ class BlockCombiner:
         
         merged_clusters = []
         visited = set()
-        merge_dist = self.style_manager.style.get("merge_distance", 2.0)
+        merge_dist = self.style_manager.style.get("merge_distance", 20.0)
         
         for i, fp in enumerate(small):
             if i in visited:
@@ -102,9 +107,11 @@ class BlockCombiner:
                     if candidate['polygon'].distance(cluster_union) < merge_dist:
                         centroid_cluster = cluster_union.centroid
                         centroid_candidate = candidate['polygon'].centroid
-                        if not self._is_blocked((centroid_cluster.x, centroid_cluster.y),
-                                                (centroid_candidate.x, centroid_candidate.y),
-                                                barrier_union):
+                        if not self._is_blocked(
+                            (centroid_cluster.x, centroid_cluster.y),
+                            (centroid_candidate.x, centroid_candidate.y),
+                            barrier_union
+                        ):
                             cluster.append(candidate)
                             visited.add(j)
                             cluster_union = unary_union([cluster_union, candidate['polygon']])
@@ -115,14 +122,26 @@ class BlockCombiner:
                 # End for
             # End while
             
-            # If the union is a MultiPolygon, select the largest polygon.
+            # If the union is a MultiPolygon, artificially expand to force merging.
             if cluster_union.geom_type == "MultiPolygon":
-                largest_poly = max(cluster_union.geoms, key=lambda g: g.area)
-                cluster_union = largest_poly
+                d = merge_dist * 0.5  # 50% of merge_dist
+                combined = cluster_union.buffer(d).buffer(-d)
+                # If still MultiPolygon, try to union the parts.
+                if combined.geom_type == "MultiPolygon":
+                    combined = unary_union(combined.geoms)
+                    if combined.geom_type == "MultiPolygon":
+                        combined = combined.convex_hull
+                cluster_union = combined
             
             avg_height = weighted_height / total_area if total_area > 0 else 4.0
+            # At this point, ensure we have a single polygon.
+            if cluster_union.geom_type == "Polygon":
+                coords = list(cluster_union.exterior.coords)[:-1]
+            else:
+                # Fallback: take convex hull
+                coords = list(cluster_union.convex_hull.exterior.coords)[:-1]
             merged_clusters.append({
-                'coords': list(cluster_union.exterior.coords)[:-1],
+                'coords': coords,
                 'height': avg_height,
                 'is_cluster': len(cluster) > 1,
                 'roof_style': self._select_random_roof() if len(cluster) > 1 else None
@@ -144,6 +163,7 @@ class BlockCombiner:
         if self.debug:
             print(f"Area-based merge: {len(large_buildings)} large buildings, {len(merged_clusters)} merged clusters.")
         return large_buildings + merged_clusters
+
     def _legacy_combine(self, features):
         """
         Legacy block subdivision approach.
@@ -225,7 +245,7 @@ class BlockCombiner:
         for road in features.get('roads', []):
             try:
                 line = LineString(road["coords"])
-                buffered = line.buffer(road_width * 0.6)
+                buffered = line.buffer(road_width * 0.2)
                 if buffered.is_valid and not buffered.is_empty:
                     barriers.append(buffered)
             except Exception:

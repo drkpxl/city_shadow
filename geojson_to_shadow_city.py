@@ -14,7 +14,7 @@ def main():
     parser.add_argument("input_json", help="Input GeoJSON file")
     parser.add_argument("output_scad", help="Output OpenSCAD file")
     parser.add_argument(
-        "--size", type=float, default=200, help="Size in mm (default: 200)"
+        "--size", type=float, default=150, help="Size in mm (default: 200)"
     )
     parser.add_argument(
         "--height", type=float, default=20, help="Maximum height in mm (default: 20)"
@@ -49,13 +49,13 @@ def main():
     parser.add_argument(
         "--road-width",
         type=float,
-        default=2.0,
+        default=1.2,
         help="Width of roads in mm (default: 2.0)",
     )
     parser.add_argument(
         "--water-depth",
         type=float,
-        default=1.4,
+        default=2,
         help="Depth of water features in mm (default: 1.4)",
     )
     parser.add_argument(
@@ -76,7 +76,7 @@ def main():
     parser.add_argument(
         "--bridge-thickness",
         type=float,
-        default=1.0,
+        default=0.6,
         help="Bridge deck thickness (default: 1.0)",
     )
     parser.add_argument(

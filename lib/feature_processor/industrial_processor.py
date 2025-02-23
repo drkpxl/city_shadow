@@ -28,11 +28,11 @@ class IndustrialProcessor(BaseProcessor):
         if not coords:
             return
 
-        # Get area and check against minimum
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
-        if area_m2 < min_area:
+        # Only skip small industrial buildings if not in block-combine mode.
+        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
             if self.debug:
                 print(f"Skipping small industrial building with area {area_m2:.1f}m²")
             return
@@ -77,19 +77,17 @@ class IndustrialProcessor(BaseProcessor):
         if landuse not in self.INDUSTRIAL_LANDUSE:
             return
 
-        # Transform coordinates
         transformed = [transform(lon, lat) for lon, lat in coords]
 
-        # Calculate area and filter small areas
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
-        if area_m2 < min_area:
+        # Only skip small industrial areas if not using block-combine style.
+        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
             if self.debug:
                 print(f"Skipping small industrial area with area {area_m2:.1f}m²")
             return
 
-        # Set height based on landuse type
         layer_specs = self.style_manager.get_default_layer_specs()
         min_height = layer_specs["buildings"]["min_height"]
         max_height = layer_specs["buildings"]["max_height"]
@@ -136,7 +134,6 @@ class IndustrialProcessor(BaseProcessor):
 
     def _get_explicit_height(self, properties):
         """Extract explicit height from properties if available."""
-        # Check explicit height tag
         if "height" in properties:
             try:
                 height_str = properties["height"].split()[0]  # Handle "10 m" format
@@ -144,7 +141,6 @@ class IndustrialProcessor(BaseProcessor):
             except (ValueError, IndexError):
                 pass
                 
-        # Check building levels
         if "building:levels" in properties:
             try:
                 levels = float(properties["building:levels"])

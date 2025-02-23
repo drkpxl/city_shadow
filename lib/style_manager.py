@@ -18,7 +18,7 @@ class StyleManager:
             "height_variance": 0.2,
             "detail_level": 1.0,
             "artistic_style": "modern",
-            "min_building_area": 600.0,
+            "min_building_area": 300.0,
         }
 
         # Override defaults with provided settings
