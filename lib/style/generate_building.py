@@ -239,7 +239,6 @@ class BuildingGenerator:
                 {' '.join(steps)}
             }}"""
 
-    def _generate_complex_roof(self, points_str, height, params):
         """
         Generate a complex roof with multiple architectural features.
         
