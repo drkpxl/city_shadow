@@ -23,6 +23,27 @@
       display: block;
       margin-bottom: 5px;
     }
+
+    /* ADDED FOR LIVE LOG */
+    .log-container {
+      margin-top: 20px;
+    }
+
+    #liveLog {
+      background-color: #1e1e1e;
+      /* Dark background */
+      color: #cfcfcf;
+      /* Lighter text */
+      padding: 10px;
+      border-radius: 5px;
+      min-height: 100px;
+      /* Some minimum height */
+      max-height: 300px;
+      /* Scroll if longer than 300px */
+      overflow-y: auto;
+      font-family: monospace;
+      white-space: pre;
+    }
   </style>
 </head>
 
@@ -117,25 +138,9 @@
               <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
             </div>
             <div class="form-group">
-              <label>Crop Bounding Box (SOUTH, WEST, NORTH, EAST)</label>
-              <div class="form-row">
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="South"
-                    name="crop_bbox1">
-                </div>
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="West"
-                    name="crop_bbox2">
-                </div>
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="North"
-                    name="crop_bbox3">
-                </div>
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="East"
-                    name="crop_bbox4">
-                </div>
-              </div>
+              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
+              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
+                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
             </div>
           </fieldset>
 
@@ -212,6 +217,13 @@
           <h3>Live Preview - Frame Model</h3>
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
+
+        <!-- ADDED FOR LIVE LOG -->
+        <div class="log-container">
+          <h4>Live Log</h4>
+          <div id="liveLog"></div>
+        </div>
+
         <div class="download-links mt-4">
           <h4>Download Rendered Files</h4>
           <div id="downloadLinks">
@@ -239,13 +251,27 @@
         type: "POST",
         data: formData,
         success: function (data) {
+          // Update preview images if available
           if (data.previewMain && data.previewFrame) {
             $("#previewMain").attr("src", data.previewMain).show();
             $("#previewFrame").attr("src", data.previewFrame).show();
           }
+
+          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
+          var logText = "";
+          if (data.stdout) {
+            logText += data.stdout + "\n";
+          }
+          if (data.stderr) {
+            logText += data.stderr + "\n";
+          }
+          if (logText.trim().length > 0) {
+            $("#liveLog").text(logText);
+          }
         },
         error: function (err) {
           console.error("Preview update error:", err);
+          $("#liveLog").text("Error generating preview:\n" + JSON.stringify(err));
         }
       });
     }
@@ -272,6 +298,7 @@
         },
         error: function (err) {
           console.error("File upload error:", err);
+          $("#liveLog").text("Error uploading file:\n" + JSON.stringify(err));
         }
       });
     });
@@ -308,7 +335,7 @@
             linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
           }
 
-          // STL downloads: add these lines to ensure STL links are displayed
+          // STL downloads
           if (data.stlFiles && data.stlFiles.mainStl) {
             linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
           }
@@ -322,9 +349,22 @@
           }
 
           $("#downloadLinks").html(linksHtml);
+
+          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
+          var logText = "";
+          if (data.stdout) {
+            logText += data.stdout + "\n";
+          }
+          if (data.stderr) {
+            logText += data.stderr + "\n";
+          }
+          if (logText.trim().length > 0) {
+            $("#liveLog").text(logText);
+          }
         },
         error: function (err) {
           console.error("Final render error:", err);
+          $("#liveLog").text("Error during final render:\n" + JSON.stringify(err));
           alert("An error occurred during final render.");
         }
       });

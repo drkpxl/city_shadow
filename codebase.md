@@ -1,4 +1,4 @@
-# __init__.py
+# **init**.py
 
 ```py
 
@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
 ```
 
-# lib/__init__.py
+# lib/**init**.py
 
 ```py
 
@@ -253,7 +253,7 @@ if __name__ == "__main__":
 ```py
 # lib/converter.py
 import json
-from .feature_processor import FeatureProcessor
+from .feature_processor.feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
 from .style.style_manager import StyleManager
 
@@ -399,7 +399,7 @@ class EnhancedCityConverter:
 difference() {{
     // Outer block (10mm larger than main model)
     cube([{frame_size}, {frame_size}, {height}]);
-    
+
     // Inner cutout (sized to match main model exactly)
     translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
@@ -407,63 +407,206 @@ difference() {{
 
 ```
 
-# lib/feature_processor.py
+# lib/feature_processor/**init**.py
 
 ```py
-# lib/feature_processor.py
+# lib/feature_processor/__init__.py
+"""
+Feature Processor package for handling different OSM feature types.
+"""
+
+```
+
+# lib/feature_processor/barrier_processor.py
+
+```py
+# lib/feature_processor/barrier_processor.py
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
-from .geometry import GeometryUtils
-from .style.style_manager import StyleManager
+def create_barrier_union(roads, railways, water, road_buffer=2.0, railway_buffer=2.0):
+    """Combine roads, railways, and water into one shapely geometry used as a 'barrier'."""
+    barrier_geoms = []
+
+    # Roads -> buffered lines
+    for road in roads:
+        line = LineString(road["coords"])
+        barrier_geoms.append(line.buffer(road_buffer))
+
+    # Railways -> buffered lines
+    for rail in railways:
+        line = LineString(rail["coords"])
+        barrier_geoms.append(line.buffer(railway_buffer))
+
+    # Water -> polygons (no buffer)
+    for wfeat in water:
+        poly = Polygon(wfeat["coords"])
+        barrier_geoms.append(poly)
+
+    if barrier_geoms:
+        return unary_union(barrier_geoms)
+    else:
+        return None
+
+```
+
+# lib/feature_processor/base_processor.py
+
+```py
+# lib/feature_processor/base_processor.py
+
+class BaseProcessor:
+    """
+    Base class for specialized feature processors.
+    Provides a place to store shared methods or initializations.
+    """
+    def __init__(self, geometry_utils, style_manager, debug=False):
+        self.geometry = geometry_utils
+        self.style_manager = style_manager
+        self.debug = debug
+
+```
+
+# lib/feature_processor/building_processor.py
+
+```py
+# lib/feature_processor/building_processor.py
+from shapely.geometry import Polygon
+from .base_processor import BaseProcessor
+
+class BuildingProcessor(BaseProcessor):
+    def process_building(self, feature, features, transform):
+        """
+        Process a regular building.
+        """
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+        min_area = self.style_manager.style.get("min_building_area", 600.0)
+
+        if area_m2 < min_area:
+            if self.debug:
+                print(f"Skipping small building with area {area_m2:.1f}m²")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        height = self.style_manager.scale_building_height(props)
+
+        features["buildings"].append({"coords": transformed, "height": height})
+        if self.debug:
+            print(f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²")
+
+```
+
+# lib/feature_processor/feature_processor.py
+
+```py
+# file: feature_processor.py
+
+from shapely.geometry import box
+from .building_processor import BuildingProcessor
+from .industrial_processor import IndustrialProcessor
+from .road_processor import RoadProcessor
+from .railway_processor import RailwayProcessor
+from .water_processor import WaterProcessor
+from .barrier_processor import create_barrier_union
+
+from ..geometry import GeometryUtils
 
 
 class FeatureProcessor:
     def __init__(self, style_manager):
         self.style_manager = style_manager
-        self.geometry = GeometryUtils()
-        self.debug = False
+        self.geometry = GeometryUtils()  # uses the same GeometryUtils
+        self.debug = True  # set True for debug prints
+
+        # Create sub-processor instances
+        self.building_proc = BuildingProcessor(self.geometry, style_manager, debug=self.debug)
+        self.industrial_proc = IndustrialProcessor(self.geometry, style_manager, debug=self.debug)
+        self.road_proc = RoadProcessor(self.geometry, style_manager, debug=self.debug)
+        self.rail_proc = RailwayProcessor(self.geometry, style_manager, debug=self.debug)
+        self.water_proc = WaterProcessor(self.geometry, style_manager, debug=self.debug)
 
     def process_features(self, geojson_data, size):
         """
-        Process and enhance GeoJSON features.
+        Parse the GeoJSON and gather features by category: water, roads, railways, buildings, etc.
+        Then merge buildings if needed, returning the final dictionary of feature lists.
         """
-        # Create a transform function from lat/lon to model coordinates
-        transform = self.geometry.create_coordinate_transformer(
-            geojson_data["features"], size
-        )
 
-        # Initialize our feature buckets
+        # Create lat/lon -> model transform
+        transform = self.geometry.create_coordinate_transformer(geojson_data["features"], size)
+
+        # Initialize buckets
         features = {
             "water": [],
             "roads": [],
             "railways": [],
             "buildings": [],
             "bridges": [],
-            "industrial": [],  # New category for industrial areas
+            "industrial": [],
         }
 
-        # First pass: Process everything except industrial landuse
+        # First pass: handle everything except industrial landuse
         for feature in geojson_data["features"]:
-            if feature.get("properties", {}).get("landuse") != "industrial":
-                self._process_single_feature(feature, features, transform)
+            props = feature.get("properties", {})
 
-        # Second pass: Process industrial landuse
+            # Coastline
+            if props.get("natural") == "coastline":
+                self.water_proc.process_coastline(feature, features, transform)
+                continue
+
+            # Water (e.g., rivers, lakes, ponds)
+            if props.get("natural") == "water":
+                self.water_proc.process_water(feature, features, transform)
+                continue
+
+            # Industrial buildings
+            if props.get("building") == "industrial":
+                self.industrial_proc.process_industrial_building(feature, features, transform)
+                continue
+
+            # "Regular" building
+            if "building" in props:
+                self.building_proc.process_building(feature, features, transform)
+                continue
+
+            # Parking vs roads vs bridges
+            if self.road_proc.is_parking_area(props):
+                self.road_proc.process_parking(feature, features, transform)
+                continue
+            if "highway" in props:
+                self.road_proc.process_road_or_bridge(feature, features, transform)
+                continue
+
+            # Railways
+            if "railway" in props:
+                self.rail_proc.process_railway(feature, features, transform)
+                continue
+
+        # Second pass: handle industrial landuse polygons
         for feature in geojson_data["features"]:
-            if feature.get("properties", {}).get("landuse") == "industrial":
-                self._process_industrial_area(feature, features, transform)
+            props = feature.get("properties", {})
+            if props.get("landuse") == "industrial":
+                self.industrial_proc.process_industrial_area(feature, features, transform)
 
-        # Store features in style manager before any merging
+        # After collecting everything, build the “ocean” polygon(s) from coastlines
+        bounding_polygon = self._compute_bounding_polygon(size)
+        self.water_proc.build_ocean_polygons(bounding_polygon, features)
+
+        # Store features in style manager (so merges can see them)
         self.style_manager.set_current_features(features)
 
-        # If debug is on, print counts
+        # If debug is on, print summary
         if self.debug:
             print(f"\nProcessed feature counts:")
-            for category, items in features.items():
-                print(f"{category.capitalize()}: {len(items)}")
+            for cat, items in features.items():
+                print(f"  {cat}: {len(items)}")
 
-        # Build one combined geometry for roads, railways, and water
-        barrier_union = self.create_barrier_union(
+        # Build a union of roads, rails, water to use as a barrier for building merges
+        barrier_union = create_barrier_union(
             roads=features["roads"],
             railways=features["railways"],
             water=features["water"],
@@ -471,79 +614,39 @@ class FeatureProcessor:
             railway_buffer=1.0,
         )
 
-        # Merge buildings using the selected style
+        # Merge all buildings + industrial into a single list
         all_buildings = features["buildings"] + features["industrial"]
-        features["buildings"] = self.style_manager.merge_nearby_buildings(
-            all_buildings, barrier_union=barrier_union
-        )
+        merged_bldgs = self.style_manager.merge_nearby_buildings(all_buildings, barrier_union)
+        features["buildings"] = merged_bldgs
 
         return features
 
-    def _process_single_feature(self, feature, features, transform):
+    def _compute_bounding_polygon(self, size):
         """
-        Examine each GeoJSON feature and decide whether it's a building,
-        water feature, road, railway, or bridge, etc., storing it accordingly.
+        Returns a Shapely Polygon from (0,0) to (size,size).
+        We subtract coastline lines from this area to create
+        an 'ocean' polygon, so it becomes everything outside
+        the coastline but within the bounding box.
         """
-        props = feature.get("properties", {})
-        coords = self.geometry.extract_coordinates(feature)
-        if not coords:
-            return
+        return box(0, 0, size, size)
 
-        # Industrial Buildings (specific handling)
-        if props.get("building") == "industrial":
-            self._process_industrial_building(props, coords, features, transform)
-            return
+```
 
-        # Regular Buildings
-        if "building" in props:
-            self._process_building(props, coords, features, transform)
-            return
+# lib/feature_processor/industrial_processor.py
 
-        # Roads / Bridges
-        if "highway" in props:
-            self._process_road_or_bridge(props, coords, features, transform)
-            return
+```py
+# lib/feature_processor/industrial_processor.py
+from shapely.geometry import Polygon
+from .base_processor import BaseProcessor
 
-        # Parking areas
-        if self._is_parking_area(props):
-            self._process_parking(coords, features, transform)
-            return
-
-        # Railways
-        if "railway" in props and not props.get("tunnel") in ["yes", "true", "1"]:
-            self._process_railway(props, coords, features, transform)
-            return
-
-        # Water features
-        if props.get("natural") == "water":
-            self._process_water(props, coords, features, transform)
-            return
-
-    def _process_industrial_area(self, feature, features, transform):
-        """Process industrial landuse areas as potential buildings."""
-        props = feature.get("properties", {})
-        coords = self.geometry.extract_coordinates(feature)
-        if not coords:
-            return
-
-        # Transform coordinates
-        transformed = [transform(lon, lat) for lon, lat in coords]
-
-        # Use a minimum height for industrial areas
-        min_height = self.style_manager.get_default_layer_specs()["buildings"][
-            "min_height"
-        ]
-
-        # Check if this area should be treated as a building
-        if self.style_manager.style["artistic_style"] == "block-combine":
-            features["industrial"].append(
-                {"coords": transformed, "height": min_height, "is_industrial": True}
-            )
-            if self.debug:
-                print(f"Added industrial area with height {min_height}mm")
-
-    def _process_industrial_building(self, props, coords, features, transform):
+class IndustrialProcessor(BaseProcessor):
+    def process_industrial_building(self, feature, features, transform):
         """Process an industrial building with specific handling."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
@@ -555,131 +658,261 @@ class FeatureProcessor:
         transformed = [transform(lon, lat) for lon, lat in coords]
         height = self.style_manager.scale_building_height(props)
 
-        # Ensure minimum height for industrial buildings
-        min_height = self.style_manager.get_default_layer_specs()["buildings"][
-            "min_height"
-        ]
+        # Ensure a minimum building height
+        min_height = self.style_manager.get_default_layer_specs()["buildings"]["min_height"]
         height = max(height, min_height)
 
         features["industrial"].append(
             {"coords": transformed, "height": height, "is_industrial": True}
         )
         if self.debug:
-            print(
-                f"Added industrial building with height {height:.1f}mm and area {area_m2:.1f}m²"
-            )
+            print(f"Added industrial building, height {height:.1f}mm, area {area_m2:.1f}m²")
 
-    def _process_building(self, props, coords, features, transform):
-        """Process a regular building."""
-        area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-        min_area = self.style_manager.style.get("min_building_area", 600.0)
-
-        if area_m2 < min_area:
-            if self.debug:
-                print(f"Skipping small building with area {area_m2:.1f}m²")
+    def process_industrial_area(self, feature, features, transform):
+        """Process industrial landuse areas as potential buildings."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
             return
 
+        # Transform coordinates
         transformed = [transform(lon, lat) for lon, lat in coords]
-        height = self.style_manager.scale_building_height(props)
-        features["buildings"].append({"coords": transformed, "height": height})
-        if self.debug:
-            print(f"Added building with height {height:.1f}mm and area {area_m2:.1f}m²")
 
-    def _is_parking_area(self, props):
-        """Check if feature is a parking area."""
-        return (
-            props.get("amenity") == "parking"
-            or props.get("parking") == "surface"
-            or props.get("service") == "parking_aisle"
-        )
+        # Use a minimum height for industrial areas
+        min_height = self.style_manager.get_default_layer_specs()["buildings"]["min_height"]
 
-    def _process_parking(self, coords, features, transform):
-        """Process a parking area."""
-        transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) >= 3:  # polygon
-            features["roads"].append(
-                {"coords": transformed, "type": "parking", "is_parking": True}
+        # If block-combine style, these will merge with others
+        if self.style_manager.style["artistic_style"] == "block-combine":
+            features["industrial"].append(
+                {"coords": transformed, "height": min_height, "is_industrial": True}
             )
             if self.debug:
-                print(f"Added parking area with {len(transformed)} points")
+                print(f"Added industrial area with height {min_height}mm")
 
-    def _process_road_or_bridge(self, props, coords, features, transform):
-        """Process a road or bridge feature."""
+```
+
+# lib/feature_processor/railway_processor.py
+
+```py
+# lib/feature_processor/railway_processor.py
+from .base_processor import BaseProcessor
+
+class RailwayProcessor(BaseProcessor):
+    def process_railway(self, feature, features, transform):
+        """Process a railway feature."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
         # Skip tunnels
         if props.get("tunnel") in ["yes", "true", "1"]:
             if self.debug:
-                print(f"Skipping tunnel road of type '{props.get('highway')}'")
+                print(f"Skipping tunnel railway: {props.get('railway')}")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) >= 2:
+            features["railways"].append({"coords": transformed, "type": props.get("railway", "unknown")})
+            if self.debug:
+                print(f"Added railway '{props.get('railway', 'unknown')}', {len(transformed)} points")
+
+```
+
+# lib/feature_processor/road_processor.py
+
+```py
+# lib/feature_processor/road_processor.py
+from .base_processor import BaseProcessor
+
+class RoadProcessor(BaseProcessor):
+    def process_road_or_bridge(self, feature, features, transform):
+        """Handle a road or bridge feature."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Skip tunnels
+        if props.get("tunnel") in ["yes", "true", "1"]:
+            if self.debug:
+                print(f"Skipping tunnel road: {props.get('highway')}")
             return
 
         transformed = [transform(lon, lat) for lon, lat in coords]
         if len(transformed) < 2:
             return
 
+        # Bridge
         if props.get("bridge") in ["yes", "true", "1"]:
             bridge_type = props.get("highway", "bridge")
             features["bridges"].append({"coords": transformed, "type": bridge_type})
             if self.debug:
-                print(
-                    f"Added bridge of type '{bridge_type}' with {len(transformed)} points"
-                )
+                print(f"Added bridge of type '{bridge_type}', {len(transformed)} points")
         else:
+            # Regular road
             road_type = props.get("highway", "unknown")
-            features["roads"].append(
-                {"coords": transformed, "type": road_type, "is_parking": False}
-            )
+            features["roads"].append({"coords": transformed, "type": road_type, "is_parking": False})
             if self.debug:
-                print(
-                    f"Added road of type '{road_type}' with {len(transformed)} points"
-                )
+                print(f"Added road of type '{road_type}', {len(transformed)} points")
 
-    def _process_railway(self, props, coords, features, transform):
-        """Process a railway feature."""
+    def process_parking(self, feature, features, transform):
+        """Process a parking area."""
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
         transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) >= 2:
-            features["railways"].append(
-                {"coords": transformed, "type": props.get("railway", "unknown")}
-            )
+        if len(transformed) >= 3:  # polygon
+            features["roads"].append({"coords": transformed, "type": "parking", "is_parking": True})
             if self.debug:
-                print(
-                    f"Added railway '{props.get('railway', 'unknown')}' with {len(transformed)} points"
-                )
+                print(f"Added parking area with {len(transformed)} points")
 
-    def _process_water(self, props, coords, features, transform):
-        """Process a water feature."""
+    def is_parking_area(self, props):
+        """Check if feature is a parking area by OSM tags."""
+        return (
+            props.get("amenity") == "parking"
+            or props.get("parking") == "surface"
+            or props.get("service") == "parking_aisle"
+        )
+
+```
+
+# lib/feature_processor/water_processor.py
+
+```py
+# lib/feature_processor/water_processor.py
+from shapely.geometry import LineString, Polygon
+from shapely.ops import unary_union
+
+from .base_processor import BaseProcessor
+
+
+
+class WaterProcessor(BaseProcessor):
+    def process_water(self, feature, features, transform):
+        """Process a natural water feature."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        if props.get("natural") != "water":
+            return
+
         transformed = [transform(lon, lat) for lon, lat in coords]
         if len(transformed) >= 3:
-            features["water"].append(
-                {"coords": transformed, "type": props.get("water", "unknown")}
-            )
+            features["water"].append({"coords": transformed, "type": props.get("water", "unknown")})
             if self.debug:
-                print(f"Added water feature with {len(transformed)} points")
+                print(f"Added water feature, {len(transformed)} points")
 
-    def create_barrier_union(
-        self, roads, railways, water, road_buffer=2.0, railway_buffer=2.0
-    ):
-        """Combine roads, railways, and water into one shapely geometry."""
-        barrier_geoms = []
+class WaterProcessor(BaseProcessor):
+    def __init__(self, geometry_utils, style_manager, debug=False):
+        super().__init__(geometry_utils, style_manager, debug)
+        self.coastline_segments = []  # store coastline lines here
 
-        # Roads -> buffered lines
-        for road in roads:
-            line = LineString(road["coords"])
-            barrier_geoms.append(line.buffer(road_buffer))
+    def process_water(self, feature, features, transform):
+        """Process a natural water feature (lakes, rivers, ponds, etc.)."""
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
 
-        # Railways -> buffered lines
-        for rail in railways:
-            line = LineString(rail["coords"])
-            barrier_geoms.append(line.buffer(railway_buffer))
+        # The existing "natural=water" logic remains unchanged.
+        if props.get("natural") == "water":
+            transformed = [transform(lon, lat) for lon, lat in coords]
+            if len(transformed) >= 3:
+                features["water"].append(
+                    {"coords": transformed, "type": props.get("water", "unknown")}
+                )
+                if self.debug:
+                    print(f"Added water feature, {len(transformed)} points")
 
-        # Water -> polygons (no buffer)
-        for wfeat in water:
-            poly = Polygon(wfeat["coords"])
-            barrier_geoms.append(poly)
+    def process_coastline(self, feature, features, transform):
+        """
+        Capture coastline segments (LineStrings).
+        We'll build ocean polygons later in a separate step.
+        """
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
 
-        if barrier_geoms:
-            return unary_union(barrier_geoms)
-        else:
-            return None
+        # Coastlines in OSM are usually stored as LineString(s)
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
+            return
 
+        self.coastline_segments.append(transformed)
+        if self.debug:
+            print(f"Captured coastline segment with {len(transformed)} points")
+
+    def build_ocean_polygons(self, bounding_polygon, features):
+        """
+        After all features have been processed, call this to create an
+        'ocean' polygon that fills everything outside the coastline but
+        within the bounding_polygon.
+
+        bounding_polygon: Shapely Polygon that covers the entire area
+                          you want to treat as 'ocean' if not land.
+        """
+        if not self.coastline_segments:
+            return  # No coastlines to process
+
+        # 1) Turn each coastline segment into a Shapely LineString
+        lines = [LineString(seg) for seg in self.coastline_segments]
+
+        # 2) Merge them all into one unified geometry
+        coastline_union = unary_union(lines)
+
+        # If the coastlines are not perfectly connected, or if you have
+        # inlets/broken segments, you might need additional bridging/buffering
+        # logic to close them. For now, we assume the union forms a boundary
+        # that encloses the land or ocean area in some consistent way.
+
+        # 3) Convert that union of lines into polygon(s). One approach:
+        #    - Buffer the coastline lines outward to get a closed ring.
+        #    - Then intersect that with the bounding polygon to produce water on
+        #      one side (depending on whether your buffer is inside or outside).
+        #    The direction depends on whether you want the “outside” to be ocean
+        #    or the “inside” to be ocean. Typical OSM convention is that coastline
+        #    lines go clockwise for water on the right (depending on data).
+        #
+        #    A simple approach is to fill everything outside the lines:
+        #        ocean_area = bounding_polygon.difference(land_polygons)
+        #    but if you do not explicitly have land polygons, you can try buffering
+        #    the coastline lines inside or outside and subtract that from bounding_box.
+
+        # Example: Just do a small outward buffer, and let that define the “land edge,”
+        # then take the difference from bounding_polygon to get the ocean polygon.
+
+        # For clarity in a minimal example, do something like:
+        coastline_poly = coastline_union.buffer(0.0001)  # small outward buffer
+        ocean_polygon = bounding_polygon.difference(coastline_poly)
+        print("Coastline union is valid?", coastline_union.is_valid)
+        print("Coastline union geometry type:", coastline_union.geom_type)
+
+        if ocean_polygon.is_empty:
+            if self.debug:
+                print("Ocean polygon ended up empty—coastline might be incomplete.")
+            return
+
+        # 4) Save the final polygon(s) to features["water"].
+        # ocean_polygon could be MultiPolygon if there are multiple unconnected areas.
+        if ocean_polygon.geom_type == "Polygon":
+            # Single polygon
+            poly_coords = list(ocean_polygon.exterior.coords)
+            features["water"].append({"coords": poly_coords, "type": "ocean"})
+            if self.debug:
+                print(f"Built ocean polygon with {len(poly_coords)} points")
+
+        elif ocean_polygon.geom_type == "MultiPolygon":
+            # Multiple polygons
+            for geom in ocean_polygon.geoms:
+                if geom.geom_type == "Polygon":
+                    poly_coords = list(geom.exterior.coords)
+                    features["water"].append({"coords": poly_coords, "type": "ocean"})
+                    if self.debug:
+                        print(f"Built ocean sub-polygon with {len(poly_coords)} points")
 ```
 
 # lib/geometry.py
@@ -1017,7 +1250,7 @@ if __name__ == "__main__":
 
 ```
 
-# lib/preview/__init__.py
+# lib/preview/**init**.py
 
 ```py
 from .openscad_integration import OpenSCADIntegration
@@ -1471,7 +1704,7 @@ difference() {{
         // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-        
+
         // Roof details (mechanical equipment, etc.)
         translate([0, 0, {height}]) {{
             linear_extrude(height=1.2, convexity=2)
@@ -1486,7 +1719,7 @@ difference() {{
         // Main structure
         linear_extrude(height={height * 0.8}, convexity=2)
             polygon([{points_str}]);
-        
+
         // Sawtooth roof
         translate([0, 0, {height * 0.8}])
             linear_extrude(height={height * 0.2}, convexity=2)
@@ -1500,7 +1733,7 @@ difference() {{
         // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-        
+
         // Simple roof edge
         translate([0, 0, {height - 0.5}])
             linear_extrude(height=0.5, convexity=2)
@@ -1591,7 +1824,7 @@ difference() {{
         base_height = layer_specs["base"]["height"]
         bridge_height = 2.0  # Height above base
         bridge_thickness = 1  # Thickness for stability
-        support_width = 2.0  # Width of bridge supports
+        support_width = 3.0  # Width of bridge supports
         road_width = layer_specs["roads"]["width"]
 
         for i, bridge in enumerate(bridge_features):
@@ -1612,7 +1845,7 @@ difference() {{
             translate([0, 0, {base_height + bridge_height}])
                 linear_extrude(height={bridge_thickness}, convexity=2)
                     polygon([{points_str}]);
-            
+
             // Bridge supports
             translate([{start_point[0]}, {start_point[1]}, {base_height}])
                 cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
@@ -1853,7 +2086,7 @@ class StyleManager:
 
 ```
 
-# lib/style/__init__.py
+# lib/style/**init**.py
 
 ```py
 from .style_manager import StyleManager
@@ -2340,7 +2573,6 @@ class StyleManager:
     "uuid": "^9.0.0"
   }
 }
-
 ```
 
 # psl
@@ -2354,7 +2586,6 @@ body {
   padding-top: 20px;
   padding-bottom: 20px;
 }
-
 ```
 
 # README.md
@@ -2371,40 +2602,50 @@ python geojson_to_shadow_city.py input.geojson output.scad [options]
 \`\`\`
 
 This creates:
+
 - `output_main.scad` - The city model
 - `output_frame.scad` - A decorative frame that fits around the model
 
 ### Basic Export Example
 
 \`\`\`bash
+
 # Generate both preview and STL files with modern style
+
 python geojson_to_shadow_city.py map.geojson output.scad \
-    --export both \
-    --style modern \
-    --size 200 \
-    --water-depth 3 \
-    --road-width 1
+ --export both \
+ --style modern \
+ --size 200 \
+ --water-depth 3 \
+ --road-width 1
 \`\`\`
 
 ## Export Options
 
 ### Preview Generation
+
 \`\`\`bash
+
 # Generate preview images
+
 python geojson_to_shadow_city.py map.geojson output.scad \
-    --export preview \
-    --preview-size 1920 1080
+ --export preview \
+ --preview-size 1920 1080
 \`\`\`
 
 ### STL Export
+
 \`\`\`bash
+
 # Generate high-quality STL files
+
 python geojson_to_shadow_city.py map.geojson output.scad \
-    --export stl \
-    --style classic
+ --export stl \
+ --style classic
 \`\`\`
 
 Creates:
+
 - `output_main.stl` - Main city model
 - `output_frame.stl` - Decorative frame
 
@@ -2415,128 +2656,145 @@ The STL files are generated using OpenSCAD's Manifold backend for optimal qualit
 The Shadow City Generator includes preprocessing capabilities to help you refine your input data before generating the 3D model.
 
 ### Distance-Based Cropping
+
 Crop features to a specific radius from the center point:
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-    --preprocess \
-    --crop-distance 1000  # Crop to 1000 meters from center
+ --preprocess \
+ --crop-distance 1000 # Crop to 1000 meters from center
 \`\`\`
 
 ### Bounding Box Cropping
+
 Crop features to a specific geographic area:
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-    --preprocess \
-    --crop-bbox 51.5074 -0.1278 51.5174 -0.1178  # south west north east
+ --preprocess \
+ --crop-bbox 51.5074 -0.1278 51.5174 -0.1178 # south west north east
 \`\`\`
 
 ## Artistic Options
 
 ### Overall Style
+
 \`\`\`bash
 --style [modern|classic|minimal]
 \`\`\`
+
 - `modern`: Sharp, angular designs with contemporary architectural details
 - `classic`: Softer edges with traditional architectural elements
 - `minimal`: Clean, simplified shapes without additional ornamentation
 
 ### Size and Scale
+
 \`\`\`bash
---size 200        # Size of the model in millimeters (default: 200)
---height 20       # Maximum height of buildings in millimeters (default: 20)
+--size 200 # Size of the model in millimeters (default: 200)
+--height 20 # Maximum height of buildings in millimeters (default: 20)
 \`\`\`
 
 ### Detail and Complexity
+
 \`\`\`bash
---detail 1.0      # Detail level from 0-2 (default: 1.0)
+--detail 1.0 # Detail level from 0-2 (default: 1.0)
 \`\`\`
 Higher values add more intricate architectural details and smoother transitions between elements.
 
 ### Building Features
 
 #### Building Size Selection
+
 \`\`\`bash
 --min-building-area 600
 \`\`\`
 Controls which buildings are included:
+
 - Low values (200-400): Include small buildings like houses and shops
 - Medium values (600-800): Focus on medium-sized structures
 - High values (1000+): Show only larger buildings like offices and apartments
 
 #### Artistic Building Combinations
+
 \`\`\`bash
 --merge-distance 2.0
 \`\`\`
 Controls how buildings are combined:
+
 - `0`: Each building stands alone
 - `1-2`: Nearby buildings gently blend together
 - `3-5`: Buildings flow into each other more dramatically
 - `6+`: Creates bold, abstract representations
 
 #### Height Artistry
+
 \`\`\`bash
 --height-variance 0.2
 \`\`\`
 Controls building height variations:
+
 - `0.0`: Uniform heights within groups
 - `0.1-0.2`: Subtle height variations
 - `0.3-0.5`: More dramatic height differences
 - `0.6+`: Bold, artistic height variations
 
 ### Road and Water Features
+
 \`\`\`bash
---road-width 2.0          # Width of roads in millimeters (default: 2.0)
---water-depth 1.4         # Depth of water features in millimeters (default: 1.4)
+--road-width 2.0 # Width of roads in millimeters (default: 2.0)
+--water-depth 1.4 # Depth of water features in millimeters (default: 1.4)
 \`\`\`
 
 ### Building Clusters
+
 \`\`\`bash
---cluster-size 3.0        # Size threshold for building clusters (default: 3.0)
+--cluster-size 3.0 # Size threshold for building clusters (default: 3.0)
 \`\`\`
 
 ## Creative Examples
 
 ### Contemporary Downtown
+
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-    --preprocess \
-    --crop-distance 800 \
-    --style modern \
-    --detail 0.5 \
-    --merge-distance 0 \
-    --min-building-area 1000 \
-    --road-width 1.5 \
-    --export both
+ --preprocess \
+ --crop-distance 800 \
+ --style modern \
+ --detail 0.5 \
+ --merge-distance 0 \
+ --min-building-area 1000 \
+ --road-width 1.5 \
+ --export both
 \`\`\`
 
 ### Historic District
+
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-    --style classic \
-    --detail 1.5 \
-    --merge-distance 3 \
-    --min-building-area 400 \
-    --height-variance 0.3 \
-    --export stl
+ --style classic \
+ --detail 1.5 \
+ --merge-distance 3 \
+ --min-building-area 400 \
+ --height-variance 0.3 \
+ --export stl
 \`\`\`
 
 ### Minimalist Urban Plan
+
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
-    --style minimal \
-    --detail 0.3 \
-    --merge-distance 0 \
-    --road-width 1.5 \
-    --water-depth 2 \
-    --export both
+ --style minimal \
+ --detail 0.3 \
+ --merge-distance 0 \
+ --road-width 1.5 \
+ --water-depth 2 \
+ --export both
 \`\`\`
 
 ## Installation
 
 1. Install Python dependencies:
-\`\`\`bash
-pip install -r requirements.txt
-\`\`\`
+   \`\`\`bash
+   pip install -r requirements.txt
+   \`\`\`
 
 2. Install OpenSCAD:
    - Windows: Download from openscad.org
@@ -2546,15 +2804,19 @@ pip install -r requirements.txt
 ## 3D Printing Guide
 
 ### Print Settings
-1. **Layer Height**: 
+
+1. **Layer Height**:
+
    - 0.2mm for good detail
    - 0.12mm for extra detail in complex areas
 
 2. **Infill**:
+
    - Main model: 10-15%
    - Frame: 20% for stability
 
 3. **Support Settings**:
+
    - Main model: Support on build plate only
    - Frame: Usually no supports needed
 
@@ -2563,6 +2825,7 @@ pip install -r requirements.txt
    - Consider using contrasting colors for main model and frame
 
 ### Assembly Tips
+
 1. Print the main model (`*_main.stl`) and frame (`*_frame.stl`) separately
 2. The frame has a 5mm border and will be slightly larger than the main model
 3. Clean any support material carefully, especially from the frame
@@ -2573,11 +2836,13 @@ pip install -r requirements.txt
 ### Common Issues
 
 1. **Long Processing Times**:
+
    - Reduce `--detail` level
    - Increase `--min-building-area`
    - Use `--crop-distance` to limit area
 
 2. **Memory Issues**:
+
    - Use `--preprocess` with smaller areas
    - Increase `--min-building-area`
    - Reduce `--detail` level
@@ -2590,6 +2855,7 @@ pip install -r requirements.txt
 ### Getting Help
 
 If you encounter issues:
+
 1. Enable debug output with `--debug`
 2. Check the generated log file (`*.log`)
 3. Verify OpenSCAD installation
@@ -2920,7 +3186,6 @@ app.post("/upload", upload.single("geojson"), (req, res) => {
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
-
 ```
 
 # views/index.ejs
@@ -2950,6 +3215,27 @@ app.listen(port, () => {
     .download-links a {
       display: block;
       margin-bottom: 5px;
+    }
+
+    /* ADDED FOR LIVE LOG */
+    .log-container {
+      margin-top: 20px;
+    }
+
+    #liveLog {
+      background-color: #1e1e1e;
+      /* Dark background */
+      color: #cfcfcf;
+      /* Lighter text */
+      padding: 10px;
+      border-radius: 5px;
+      min-height: 100px;
+      /* Some minimum height */
+      max-height: 300px;
+      /* Scroll if longer than 300px */
+      overflow-y: auto;
+      font-family: monospace;
+      white-space: pre;
     }
   </style>
 </head>
@@ -3140,6 +3426,13 @@ app.listen(port, () => {
           <h3>Live Preview - Frame Model</h3>
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
+
+        <!-- ADDED FOR LIVE LOG -->
+        <div class="log-container">
+          <h4>Live Log</h4>
+          <div id="liveLog"></div>
+        </div>
+
         <div class="download-links mt-4">
           <h4>Download Rendered Files</h4>
           <div id="downloadLinks">
@@ -3167,13 +3460,27 @@ app.listen(port, () => {
         type: "POST",
         data: formData,
         success: function (data) {
+          // Update preview images if available
           if (data.previewMain && data.previewFrame) {
             $("#previewMain").attr("src", data.previewMain).show();
             $("#previewFrame").attr("src", data.previewFrame).show();
           }
+
+          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
+          var logText = "";
+          if (data.stdout) {
+            logText += data.stdout + "\n";
+          }
+          if (data.stderr) {
+            logText += data.stderr + "\n";
+          }
+          if (logText.trim().length > 0) {
+            $("#liveLog").text(logText);
+          }
         },
         error: function (err) {
           console.error("Preview update error:", err);
+          $("#liveLog").text("Error generating preview:\n" + JSON.stringify(err));
         }
       });
     }
@@ -3200,6 +3507,7 @@ app.listen(port, () => {
         },
         error: function (err) {
           console.error("File upload error:", err);
+          $("#liveLog").text("Error uploading file:\n" + JSON.stringify(err));
         }
       });
     });
@@ -3236,7 +3544,7 @@ app.listen(port, () => {
             linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
           }
 
-          // STL downloads: add these lines to ensure STL links are displayed
+          // STL downloads
           if (data.stlFiles && data.stlFiles.mainStl) {
             linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
           }
@@ -3250,9 +3558,22 @@ app.listen(port, () => {
           }
 
           $("#downloadLinks").html(linksHtml);
+
+          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
+          var logText = "";
+          if (data.stdout) {
+            logText += data.stdout + "\n";
+          }
+          if (data.stderr) {
+            logText += data.stderr + "\n";
+          }
+          if (logText.trim().length > 0) {
+            $("#liveLog").text(logText);
+          }
         },
         error: function (err) {
           console.error("Final render error:", err);
+          $("#liveLog").text("Error during final render:\n" + JSON.stringify(err));
           alert("An error occurred during final render.");
         }
       });
@@ -3315,4 +3636,3 @@ app.listen(port, () => {
 
 </html>
 ```
-

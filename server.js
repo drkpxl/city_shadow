@@ -100,19 +100,25 @@ app.post("/preview", (req, res) => {
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-  if (
-    req.body.crop_bbox1 &&
-    req.body.crop_bbox2 &&
-    req.body.crop_bbox3 &&
-    req.body.crop_bbox4
-  ) {
-    args.push(
-      "--crop-bbox",
-      req.body.crop_bbox1,
-      req.body.crop_bbox2,
-      req.body.crop_bbox3,
-      req.body.crop_bbox4
-    );
+
+  // Process bounding box from Overpass format
+  if (req.body["crop-bbox"]) {
+    // Split the input string and convert to numbers
+    const bbox = req.body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
+      args.push(
+        "--crop-bbox",
+        bbox[0].toString(), // South
+        bbox[1].toString(), // West
+        bbox[2].toString(), // North
+        bbox[3].toString() // East
+      );
+    }
   }
 
   // Preview integration options
@@ -201,19 +207,25 @@ app.post("/render", (req, res) => {
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-  if (
-    req.body.crop_bbox1 &&
-    req.body.crop_bbox2 &&
-    req.body.crop_bbox3 &&
-    req.body.crop_bbox4
-  ) {
-    args.push(
-      "--crop-bbox",
-      req.body.crop_bbox1,
-      req.body.crop_bbox2,
-      req.body.crop_bbox3,
-      req.body.crop_bbox4
-    );
+
+  // Process bounding box from Overpass format
+  if (req.body["crop-bbox"]) {
+    // Split the input string and convert to numbers
+    const bbox = req.body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
+      args.push(
+        "--crop-bbox",
+        bbox[0].toString(), // South
+        bbox[1].toString(), // West
+        bbox[2].toString(), // North
+        bbox[3].toString() // East
+      );
+    }
   }
 
   // Export options
@@ -262,7 +274,7 @@ app.post("/render", (req, res) => {
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
-    // New: include STL download links if export mode is "stl" or "both"
+    // Include STL download links if export mode is "stl" or "both"
     let stlFiles = {};
     if (req.body.export === "stl" || req.body.export === "both") {
       const mainStl = outputBase + "_main.stl";

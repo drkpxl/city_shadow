@@ -1,6 +1,6 @@
 # lib/converter.py
 import json
-from .feature_processor import FeatureProcessor
+from .feature_processor.feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
 from .style.style_manager import StyleManager
 
