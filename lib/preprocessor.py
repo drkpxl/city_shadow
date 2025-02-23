@@ -89,11 +89,11 @@ class GeoJSONPreprocessor:
 
         # If geometrycollection, pick a valid geometry
         if clipped.geom_type == "GeometryCollection":
+            # Use clipped.geoms under Shapely >= 2.0
             valid_geoms = [
                 g
-                for g in clipped
-                if g.geom_type
-                in ["Polygon", "MultiPolygon", "LineString", "MultiLineString"]
+                for g in clipped.geoms
+                if g.geom_type in ["Polygon", "MultiPolygon", "LineString", "MultiLineString"]
             ]
             if not valid_geoms:
                 return None
@@ -101,9 +101,7 @@ class GeoJSONPreprocessor:
             polygons = [
                 g for g in valid_geoms if g.geom_type in ["Polygon", "MultiPolygon"]
             ]
-            clipped = (
-                max(polygons, key=lambda g: g.area) if polygons else valid_geoms[0]
-            )
+            clipped = max(polygons, key=lambda g: g.area) if polygons else valid_geoms[0]
 
         new_feature = deepcopy(feature)
         new_feature["geometry"] = mapping(clipped)
