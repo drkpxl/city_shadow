@@ -279,7 +279,7 @@ difference() {{
                     f"""
         // Bridge {i+1}
         union() {{
-            color("red")
+            color("orange")
             {{
                 // Main bridge deck
                 translate([0, 0, {base_height + bridge_height}])
