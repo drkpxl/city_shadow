@@ -18,6 +18,13 @@ class EnhancedCityConverter:
         # Initialize layer specifications
         self.layer_specs = self.style_manager.get_default_layer_specs()
 
+        # ADDED FOR BRIDGES: store user values in layer_specs
+        self.layer_specs["bridges"] = {
+            "height": style_settings.get("bridge_height", 2.0),
+            "thickness": style_settings.get("bridge_thickness", 1.0),
+            "support_width": style_settings.get("support_width", 2.0),
+        }
+
     def print_debug(self, *args):
         """Log debug messages"""
         message = " ".join(str(arg) for arg in args)
@@ -32,7 +39,7 @@ class EnhancedCityConverter:
             with open(input_file) as f:
                 data = json.load(f)
 
-            # Process features - this will now handle setting features in style_manager
+            # Process features
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
 
@@ -86,7 +93,7 @@ class EnhancedCityConverter:
             self.print_debug("\nPreprocessing GeoJSON data...")
             processed_data = preprocessor.process_geojson(data)
 
-            # Process features - this will now handle setting features in style_manager
+            # Process features
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(
                 processed_data, self.size
@@ -137,17 +144,14 @@ class EnhancedCityConverter:
         The frame's inner dimensions match the main model size exactly,
         with a 5mm border around all sides.
         """
-        frame_size = size + 10  # Add 10mm to total size (5mm on each side)
+        frame_size = size + 10  # Add 10mm total (5mm each side)
         return f"""// Frame for city model
 // Outer size: {frame_size}mm x {frame_size}mm x {height}mm
 // Inner size: {size}mm x {size}mm x {height}mm
 // Frame width: 5mm
 
 difference() {{
-    // Outer block (10mm larger than main model)
     cube([{frame_size}, {frame_size}, {height}]);
-    
-    // Inner cutout (sized to match main model exactly)
     translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
 }}"""

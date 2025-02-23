@@ -86,6 +86,26 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
+    # NEW arguments for bridge parameters:
+    parser.add_argument(
+        "--bridge-height",
+        type=float,
+        default=2.0,
+        help="Bridge deck height above the base (default: 2.0)",
+    )
+    parser.add_argument(
+        "--bridge-thickness",
+        type=float,
+        default=1.0,
+        help="Bridge deck thickness (default: 1.0)",
+    )
+    parser.add_argument(
+        "--support-width",
+        type=float,
+        default=2.0,
+        help="Bridge support column radius (default: 2.0)",
+    )
+
     # Preprocessing arguments
     preprocess_group = parser.add_argument_group("Preprocessing options")
     preprocess_group.add_argument(
@@ -157,6 +177,11 @@ def main():
             "cluster_size": args.cluster_size,
             "height_variance": args.height_variance,
             "min_building_area": args.min_building_area,
+
+            # NEW lines for bridging:
+            "bridge_height": args.bridge_height,
+            "bridge_thickness": args.bridge_thickness,
+            "support_width": args.support_width,
         }
 
         # Create converter instance
@@ -271,6 +296,13 @@ class EnhancedCityConverter:
         # Initialize layer specifications
         self.layer_specs = self.style_manager.get_default_layer_specs()
 
+        # ADDED FOR BRIDGES: store user values in layer_specs
+        self.layer_specs["bridges"] = {
+            "height": style_settings.get("bridge_height", 2.0),
+            "thickness": style_settings.get("bridge_thickness", 1.0),
+            "support_width": style_settings.get("support_width", 2.0),
+        }
+
     def print_debug(self, *args):
         """Log debug messages"""
         message = " ".join(str(arg) for arg in args)
@@ -285,7 +317,7 @@ class EnhancedCityConverter:
             with open(input_file) as f:
                 data = json.load(f)
 
-            # Process features - this will now handle setting features in style_manager
+            # Process features
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(data, self.size)
 
@@ -339,7 +371,7 @@ class EnhancedCityConverter:
             self.print_debug("\nPreprocessing GeoJSON data...")
             processed_data = preprocessor.process_geojson(data)
 
-            # Process features - this will now handle setting features in style_manager
+            # Process features
             self.print_debug("\nProcessing features...")
             features = self.feature_processor.process_features(
                 processed_data, self.size
@@ -390,17 +422,14 @@ class EnhancedCityConverter:
         The frame's inner dimensions match the main model size exactly,
         with a 5mm border around all sides.
         """
-        frame_size = size + 10  # Add 10mm to total size (5mm on each side)
+        frame_size = size + 10  # Add 10mm total (5mm each side)
         return f"""// Frame for city model
 // Outer size: {frame_size}mm x {frame_size}mm x {height}mm
 // Inner size: {size}mm x {size}mm x {height}mm
 // Frame width: 5mm
 
 difference() {{
-    // Outer block (10mm larger than main model)
     cube([{frame_size}, {frame_size}, {height}]);
-    
-    // Inner cutout (sized to match main model exactly)
     translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
 }}"""
@@ -1513,7 +1542,6 @@ class PreviewGenerator:
 from .geometry import GeometryUtils
 from .style.style_manager import StyleManager
 
-
 class ScadGenerator:
     def __init__(self, style_manager):
         self.style_manager = style_manager
@@ -1570,8 +1598,6 @@ difference() {{
             is_cluster = building.get("is_cluster", False)
             is_industrial = building.get("is_industrial", False)
             is_block = building.get("is_block", False)
-
-            # [ADDED/CHANGED] Pass along 'roof_style' if present
             roof_style = building.get("roof_style", None)
 
             details = self._generate_building_details(
@@ -1596,28 +1622,22 @@ difference() {{
     def _generate_building_details(self, points_str, height, is_cluster=False,
                                    is_industrial=False, is_block=False,
                                    roof_style=None):
-        """
-        Generate architectural details based on style and building type.
-        """
-
         style = self.style_manager.style["artistic_style"]
         detail_level = self.style_manager.style["detail_level"]
 
-        # [ADDED for block roofs]
-        # If this building has 'is_block=True' and a 'roof_style', pick that style snippet.
+        # If block style has a special roof
         if is_block and roof_style:
             return self._generate_block_roof(points_str, height, roof_style)
 
-        # Industrial buildings
         if is_industrial:
             return self._generate_industrial_details(points_str, height, style, detail_level)
 
-        # If it's not a cluster or we have very low detail, do a simple extrusion
+        # Normal building
         if not is_cluster or detail_level < 0.5:
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
-        # Otherwise handle normal "modern"/"classic"/"minimal" styles for multi-building clusters
+        # Multi-building clusters in certain styles
         if style == "modern":
             return f"""
     union() {{
@@ -1642,11 +1662,8 @@ difference() {{
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
-    # [ADDED new helper to handle block roofs]
     def _generate_block_roof(self, points_str, height, roof_style):
-        """
-        For block-combine polygons, pick a roof style snippet based on 'roof_style'.
-        """
+        """For block-combine polygons, pick a specific roof style snippet."""
         if roof_style == "flat":
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
@@ -1673,7 +1690,7 @@ difference() {{
                     polygon([{points_str}]);
     }}"""
 
-        else:  # e.g. "modern"
+        else:  # fallback "modern" style
             return f"""
     union() {{
         linear_extrude(height={height}, convexity=2)
@@ -1685,18 +1702,12 @@ difference() {{
     }}"""
 
     def _generate_industrial_details(self, points_str, height, style, detail_level):
-        """
-        Generate special extrusions for industrial buildings (with different roof shapes).
-        """
+        """Generate special extrusions for industrial buildings."""
         if style == "modern":
-            # Modern industrial: flat roof + mechanical details
             return f"""
     union() {{
-        // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-        
-        // Roof detail
         translate([0, 0, {height}]) {{
             linear_extrude(height=1.2, convexity=2)
                 offset(r=-2)
@@ -1709,20 +1720,16 @@ difference() {{
     union() {{
         linear_extrude(height={height * 0.8}, convexity=2)
             polygon([{points_str}]);
-
-        // Sawtooth roof
         translate([0, 0, {height * 0.8}])
             linear_extrude(height={height * 0.2}, convexity=2)
                 offset(r=-1)
                     polygon([{points_str}]);
     }}"""
         else:
-            # minimal or fallback: block + slight roof edge
             return f"""
     union() {{
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-        
         translate([0, 0, {height - 0.5}])
             linear_extrude(height=0.5, convexity=2)
                 offset(r=-0.5)
@@ -1730,12 +1737,8 @@ difference() {{
     }}"""
 
     def _generate_park_features(self, park_features, layer_specs):
-        """
-        Extrude 'parks' or green areas from (base_height + start_offset) up to thickness.
-        """
         scad = []
         base_height = layer_specs["base"]["height"]
-
         park_start = layer_specs["parks"].get("start_offset", 0.2)
         park_thickness = layer_specs["parks"].get("thickness", 0.4)
 
@@ -1754,7 +1757,6 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_water_features(self, water_features, layer_specs):
-        """Generate OpenSCAD code for water features (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         water_depth = layer_specs["water"]["depth"]
@@ -1774,7 +1776,6 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for roads (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
@@ -1785,13 +1786,12 @@ difference() {{
             is_parking = road.get("is_parking", False)
 
             if is_parking and len(coords) >= 3:
-                # Parking as polygon
                 points_str = self.geometry.generate_polygon_points(coords)
             else:
-                # Road as buffered line
-                points_str = None
                 if len(coords) >= 2:
                     points_str = self.geometry.generate_buffered_polygon(coords, road_width)
+                else:
+                    points_str = None
 
             if points_str:
                 scad.append(
@@ -1805,7 +1805,6 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_railway_features(self, railway_features, layer_specs):
-        """Generate OpenSCAD code for railways (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         railway_depth = layer_specs["railways"]["depth"]
@@ -1832,9 +1831,13 @@ difference() {{
         """Generate OpenSCAD code for bridges with basic 3D-printing supports."""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = 2.0      # Height above the base
-        bridge_thickness = 1.0   # Bridge deck thickness
-        support_width = 2.0      # Support column radius
+
+        # Updated to read from layer_specs["bridges"]
+        bridge_height = layer_specs["bridges"]["height"]
+        bridge_thickness = layer_specs["bridges"]["thickness"]
+        support_width = layer_specs["bridges"]["support_width"]
+
+        # For the deck's "road" surface, we'll use roads["width"] (or you could store separately).
         road_width = layer_specs["roads"]["width"]
 
         for i, bridge in enumerate(bridge_features):
@@ -1855,12 +1858,13 @@ difference() {{
             translate([0, 0, {base_height + bridge_height}])
                 linear_extrude(height={bridge_thickness}, convexity=2)
                     polygon([{points_str}]);
-            
+
             // Bridge supports at endpoints
             translate([{start_point[0]}, {start_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
+                cylinder(h={bridge_height}, r={support_width}, $fn=8);
+
             translate([{end_point[0]}, {end_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
+                cylinder(h={bridge_height}, r={support_width}, $fn=8);
         }}"""
                 )
 
@@ -2911,21 +2915,19 @@ const port = process.env.PORT || 3000;
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
-// Serve static files from public and output directories
+// Serve static files
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static("uploads"));
 app.use("/outputs", express.static("outputs"));
 
-// Parse URL-encoded bodies (for form submissions)
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// GET route for the index page
 app.get("/", (req, res) => {
   res.render("index");
 });
 
-// Ensure uploads and outputs directories exist
+// Ensure uploads/outputs folders exist
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
@@ -2935,40 +2937,36 @@ if (!fs.existsSync(outputsDir)) {
   fs.mkdirSync(outputsDir);
 }
 
-// Setup Multer for file uploads
+// Multer setup
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, "uploads/");
   },
   filename: function (req, file, cb) {
-    // Generate a unique filename to avoid collisions
     const uniqueSuffix = Date.now() + "-" + uuidv4();
     cb(null, uniqueSuffix + "-" + file.originalname);
   },
 });
 const upload = multer({ storage: storage });
 
-// Endpoint to handle AJAX file upload for live preview
+// Endpoint to handle AJAX file upload
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded." });
   }
-  // Return the absolute path for the Python tool
   const filePath = path.join(__dirname, req.file.path);
   res.json({ filePath: filePath });
 });
 
-// Endpoint to generate live previews based on current form options
+// Live preview endpoint
 app.post("/preview", (req, res) => {
   const uploadedFile = req.body.uploadedFile;
   if (!uploadedFile) {
     return res.status(400).json({ error: "No uploaded file provided." });
   }
-  // Generate a unique base name for the preview outputs
   const outputBase = "preview-" + Date.now() + "-" + uuidv4();
   const outputScad = path.join(outputsDir, outputBase + ".scad");
 
-  // Build arguments for preview generation. We use --export preview.
   let args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
     uploadedFile,
@@ -2977,7 +2975,7 @@ app.post("/preview", (req, res) => {
     "preview",
   ];
 
-  // Add basic options if provided
+  // Basic options
   if (req.body.size) args.push("--size", req.body.size);
   if (req.body.height) args.push("--height", req.body.height);
   if (req.body.style) args.push("--style", req.body.style);
@@ -2995,32 +2993,38 @@ app.post("/preview", (req, res) => {
     args.push("--min-building-area", req.body["min-building-area"]);
   if (req.body.debug === "on") args.push("--debug");
 
-  // Preprocessing options
+  // NEW bridging lines
+  if (req.body["bridge-height"]) {
+    args.push("--bridge-height", req.body["bridge-height"]);
+  }
+  if (req.body["bridge-thickness"]) {
+    args.push("--bridge-thickness", req.body["bridge-thickness"]);
+  }
+  if (req.body["support-width"]) {
+    args.push("--support-width", req.body["support-width"]);
+  }
+
+  // Preprocessing
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-
-  // Process bounding box from Overpass format
   if (req.body["crop-bbox"]) {
-    // Split the input string and convert to numbers
     const bbox = req.body["crop-bbox"]
       .split(",")
       .map((coord) => coord.trim())
       .map(Number);
-
     if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
       args.push(
         "--crop-bbox",
-        bbox[0].toString(), // South
-        bbox[1].toString(), // West
-        bbox[2].toString(), // North
-        bbox[3].toString() // East
+        bbox[0].toString(),
+        bbox[1].toString(),
+        bbox[2].toString(),
+        bbox[3].toString()
       );
     }
   }
 
-  // Preview integration options
+  // Preview integration
   if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
     args.push(
       "--preview-size",
@@ -3028,11 +3032,15 @@ app.post("/preview", (req, res) => {
       req.body["preview-size-height"]
     );
   }
-  if (req.body["preview-file"])
+  if (req.body["preview-file"]) {
     args.push("--preview-file", req.body["preview-file"]);
-  if (req.body.watch === "on") args.push("--watch");
-  if (req.body["openscad-path"])
+  }
+  if (req.body.watch === "on") {
+    args.push("--watch");
+  }
+  if (req.body["openscad-path"]) {
     args.push("--openscad-path", req.body["openscad-path"]);
+  }
 
   console.log("Live preview generation command:", args.join(" "));
 
@@ -3052,9 +3060,6 @@ app.post("/preview", (req, res) => {
       console.error(stderrData);
       return res.status(500).json({ error: stderrData });
     }
-    // Assume that the Python tool creates two preview images:
-    //  - [outputBase]_preview_main.png
-    //  - [outputBase]_preview_frame.png
     const previewMain = outputBase + "_preview_main.png";
     const previewFrame = outputBase + "_preview_frame.png";
 
@@ -3067,17 +3072,15 @@ app.post("/preview", (req, res) => {
   });
 });
 
-// New endpoint for final model generation using the already-uploaded file
+// Final render endpoint
 app.post("/render", (req, res) => {
   const uploadedFile = req.body.uploadedFile;
   if (!uploadedFile) {
     return res.status(400).json({ error: "No uploaded file provided." });
   }
-  // Generate a unique output base name (without extension)
   const outputBase = "output-" + Date.now() + "-" + uuidv4();
   const outputPath = path.join(outputsDir, outputBase + ".scad");
 
-  // Build arguments for the Python tool:
   let args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
     uploadedFile,
@@ -3102,27 +3105,33 @@ app.post("/render", (req, res) => {
     args.push("--min-building-area", req.body["min-building-area"]);
   if (req.body.debug === "on") args.push("--debug");
 
-  // Preprocessing options
+  // NEW bridging lines
+  if (req.body["bridge-height"]) {
+    args.push("--bridge-height", req.body["bridge-height"]);
+  }
+  if (req.body["bridge-thickness"]) {
+    args.push("--bridge-thickness", req.body["bridge-thickness"]);
+  }
+  if (req.body["support-width"]) {
+    args.push("--support-width", req.body["support-width"]);
+  }
+
+  // Preprocessing
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-
-  // Process bounding box from Overpass format
   if (req.body["crop-bbox"]) {
-    // Split the input string and convert to numbers
     const bbox = req.body["crop-bbox"]
       .split(",")
       .map((coord) => coord.trim())
       .map(Number);
-
     if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
       args.push(
         "--crop-bbox",
-        bbox[0].toString(), // South
-        bbox[1].toString(), // West
-        bbox[2].toString(), // North
-        bbox[3].toString() // East
+        bbox[0].toString(),
+        bbox[1].toString(),
+        bbox[2].toString(),
+        bbox[3].toString()
       );
     }
   }
@@ -3133,7 +3142,7 @@ app.post("/render", (req, res) => {
   if (req.body["no-repair"] === "on") args.push("--no-repair");
   if (req.body.force === "on") args.push("--force");
 
-  // Preview and Integration options
+  // Preview & integration
   if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
     args.push(
       "--preview-size",
@@ -3141,11 +3150,15 @@ app.post("/render", (req, res) => {
       req.body["preview-size-height"]
     );
   }
-  if (req.body["preview-file"])
+  if (req.body["preview-file"]) {
     args.push("--preview-file", req.body["preview-file"]);
-  if (req.body.watch === "on") args.push("--watch");
-  if (req.body["openscad-path"])
+  }
+  if (req.body.watch === "on") {
+    args.push("--watch");
+  }
+  if (req.body["openscad-path"]) {
     args.push("--openscad-path", req.body["openscad-path"]);
+  }
 
   console.log("Final render command:", args.join(" "));
 
@@ -3165,15 +3178,10 @@ app.post("/render", (req, res) => {
       console.error(stderrData);
       return res.status(500).json({ error: stderrData });
     }
-    // Assume that the Python tool creates:
-    //  - [outputBase]_main.scad
-    //  - [outputBase]_frame.scad
-    //  - [outputBase].scad.log
     const mainScad = outputBase + "_main.scad";
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
-    // Include STL download links if export mode is "stl" or "both"
     let stlFiles = {};
     if (req.body.export === "stl" || req.body.export === "both") {
       const mainStl = outputBase + "_main.stl";
@@ -3195,7 +3203,7 @@ app.post("/render", (req, res) => {
   });
 });
 
-// Fallback /upload endpoint (if needed for non-AJAX uploads)
+// Fallback /upload endpoint (if needed)
 app.post("/upload", upload.single("geojson"), (req, res) => {
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
@@ -3279,6 +3287,23 @@ app.listen(port, () => {
             <label for="geojson">GeoJSON File</label>
             <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
           </div>
+          <!-- Preprocessing Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preprocessing Options</legend>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
+              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            </div>
+            <div class="form-group">
+              <label for="crop-distance">Crop Distance (meters)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+            </div>
+            <div class="form-group">
+              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
+              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
+                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
+            </div>
+          </fieldset>
 
           <!-- Basic Options -->
           <fieldset class="border p-3 mb-3">
@@ -3341,21 +3366,24 @@ app.listen(port, () => {
             </div>
           </fieldset>
 
-          <!-- Preprocessing Options -->
+
+          <!-- Bridge Options -->
           <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Preprocessing Options</legend>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
-              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            <legend class="w-auto">Bridge Options</legend>
+            <div class="form-group">
+              <label for="bridge-height">Bridge Deck Height Above Base</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="bridge-height" name="bridge-height"
+                value="2.0">
             </div>
             <div class="form-group">
-              <label for="crop-distance">Crop Distance (meters)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+              <label for="bridge-thickness">Bridge Deck Thickness</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="bridge-thickness"
+                name="bridge-thickness" value="1.0">
             </div>
             <div class="form-group">
-              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
-              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
-                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
+              <label for="support-width">Bridge Support Radius</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="support-width" name="support-width"
+                value="2.0">
             </div>
           </fieldset>
 

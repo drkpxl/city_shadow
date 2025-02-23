@@ -65,6 +65,23 @@
             <label for="geojson">GeoJSON File</label>
             <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
           </div>
+          <!-- Preprocessing Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preprocessing Options</legend>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
+              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            </div>
+            <div class="form-group">
+              <label for="crop-distance">Crop Distance (meters)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+            </div>
+            <div class="form-group">
+              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
+              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
+                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
+            </div>
+          </fieldset>
 
           <!-- Basic Options -->
           <fieldset class="border p-3 mb-3">
@@ -127,21 +144,24 @@
             </div>
           </fieldset>
 
-          <!-- Preprocessing Options -->
+
+          <!-- Bridge Options -->
           <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Preprocessing Options</legend>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
-              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            <legend class="w-auto">Bridge Options</legend>
+            <div class="form-group">
+              <label for="bridge-height">Bridge Deck Height Above Base</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="bridge-height" name="bridge-height"
+                value="2.0">
             </div>
             <div class="form-group">
-              <label for="crop-distance">Crop Distance (meters)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+              <label for="bridge-thickness">Bridge Deck Thickness</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="bridge-thickness"
+                name="bridge-thickness" value="1.0">
             </div>
             <div class="form-group">
-              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
-              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
-                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
+              <label for="support-width">Bridge Support Radius</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="support-width" name="support-width"
+                value="2.0">
             </div>
           </fieldset>
 

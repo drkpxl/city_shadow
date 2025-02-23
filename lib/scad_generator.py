@@ -3,7 +3,6 @@
 from .geometry import GeometryUtils
 from .style.style_manager import StyleManager
 
-
 class ScadGenerator:
     def __init__(self, style_manager):
         self.style_manager = style_manager
@@ -60,8 +59,6 @@ difference() {{
             is_cluster = building.get("is_cluster", False)
             is_industrial = building.get("is_industrial", False)
             is_block = building.get("is_block", False)
-
-            # [ADDED/CHANGED] Pass along 'roof_style' if present
             roof_style = building.get("roof_style", None)
 
             details = self._generate_building_details(
@@ -86,28 +83,22 @@ difference() {{
     def _generate_building_details(self, points_str, height, is_cluster=False,
                                    is_industrial=False, is_block=False,
                                    roof_style=None):
-        """
-        Generate architectural details based on style and building type.
-        """
-
         style = self.style_manager.style["artistic_style"]
         detail_level = self.style_manager.style["detail_level"]
 
-        # [ADDED for block roofs]
-        # If this building has 'is_block=True' and a 'roof_style', pick that style snippet.
+        # If block style has a special roof
         if is_block and roof_style:
             return self._generate_block_roof(points_str, height, roof_style)
 
-        # Industrial buildings
         if is_industrial:
             return self._generate_industrial_details(points_str, height, style, detail_level)
 
-        # If it's not a cluster or we have very low detail, do a simple extrusion
+        # Normal building
         if not is_cluster or detail_level < 0.5:
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
-        # Otherwise handle normal "modern"/"classic"/"minimal" styles for multi-building clusters
+        # Multi-building clusters in certain styles
         if style == "modern":
             return f"""
     union() {{
@@ -132,11 +123,8 @@ difference() {{
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
-    # [ADDED new helper to handle block roofs]
     def _generate_block_roof(self, points_str, height, roof_style):
-        """
-        For block-combine polygons, pick a roof style snippet based on 'roof_style'.
-        """
+        """For block-combine polygons, pick a specific roof style snippet."""
         if roof_style == "flat":
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
@@ -163,7 +151,7 @@ difference() {{
                     polygon([{points_str}]);
     }}"""
 
-        else:  # e.g. "modern"
+        else:  # fallback "modern" style
             return f"""
     union() {{
         linear_extrude(height={height}, convexity=2)
@@ -175,18 +163,12 @@ difference() {{
     }}"""
 
     def _generate_industrial_details(self, points_str, height, style, detail_level):
-        """
-        Generate special extrusions for industrial buildings (with different roof shapes).
-        """
+        """Generate special extrusions for industrial buildings."""
         if style == "modern":
-            # Modern industrial: flat roof + mechanical details
             return f"""
     union() {{
-        // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-        
-        // Roof detail
         translate([0, 0, {height}]) {{
             linear_extrude(height=1.2, convexity=2)
                 offset(r=-2)
@@ -199,20 +181,16 @@ difference() {{
     union() {{
         linear_extrude(height={height * 0.8}, convexity=2)
             polygon([{points_str}]);
-
-        // Sawtooth roof
         translate([0, 0, {height * 0.8}])
             linear_extrude(height={height * 0.2}, convexity=2)
                 offset(r=-1)
                     polygon([{points_str}]);
     }}"""
         else:
-            # minimal or fallback: block + slight roof edge
             return f"""
     union() {{
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-        
         translate([0, 0, {height - 0.5}])
             linear_extrude(height=0.5, convexity=2)
                 offset(r=-0.5)
@@ -220,12 +198,8 @@ difference() {{
     }}"""
 
     def _generate_park_features(self, park_features, layer_specs):
-        """
-        Extrude 'parks' or green areas from (base_height + start_offset) up to thickness.
-        """
         scad = []
         base_height = layer_specs["base"]["height"]
-
         park_start = layer_specs["parks"].get("start_offset", 0.2)
         park_thickness = layer_specs["parks"].get("thickness", 0.4)
 
@@ -244,7 +218,6 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_water_features(self, water_features, layer_specs):
-        """Generate OpenSCAD code for water features (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         water_depth = layer_specs["water"]["depth"]
@@ -264,7 +237,6 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for roads (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
@@ -275,13 +247,12 @@ difference() {{
             is_parking = road.get("is_parking", False)
 
             if is_parking and len(coords) >= 3:
-                # Parking as polygon
                 points_str = self.geometry.generate_polygon_points(coords)
             else:
-                # Road as buffered line
-                points_str = None
                 if len(coords) >= 2:
                     points_str = self.geometry.generate_buffered_polygon(coords, road_width)
+                else:
+                    points_str = None
 
             if points_str:
                 scad.append(
@@ -295,7 +266,6 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_railway_features(self, railway_features, layer_specs):
-        """Generate OpenSCAD code for railways (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         railway_depth = layer_specs["railways"]["depth"]
@@ -322,9 +292,13 @@ difference() {{
         """Generate OpenSCAD code for bridges with basic 3D-printing supports."""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = 2.0      # Height above the base
-        bridge_thickness = 1.0   # Bridge deck thickness
-        support_width = 2.0      # Support column radius
+
+        # Updated to read from layer_specs["bridges"]
+        bridge_height = layer_specs["bridges"]["height"]
+        bridge_thickness = layer_specs["bridges"]["thickness"]
+        support_width = layer_specs["bridges"]["support_width"]
+
+        # For the deck's "road" surface, we'll use roads["width"] (or you could store separately).
         road_width = layer_specs["roads"]["width"]
 
         for i, bridge in enumerate(bridge_features):
@@ -345,12 +319,13 @@ difference() {{
             translate([0, 0, {base_height + bridge_height}])
                 linear_extrude(height={bridge_thickness}, convexity=2)
                     polygon([{points_str}]);
-            
+
             // Bridge supports at endpoints
             translate([{start_point[0]}, {start_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
+                cylinder(h={bridge_height}, r={support_width}, $fn=8);
+
             translate([{end_point[0]}, {end_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
+                cylinder(h={bridge_height}, r={support_width}, $fn=8);
         }}"""
                 )
 

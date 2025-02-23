@@ -66,6 +66,26 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
+    # NEW arguments for bridge parameters:
+    parser.add_argument(
+        "--bridge-height",
+        type=float,
+        default=2.0,
+        help="Bridge deck height above the base (default: 2.0)",
+    )
+    parser.add_argument(
+        "--bridge-thickness",
+        type=float,
+        default=1.0,
+        help="Bridge deck thickness (default: 1.0)",
+    )
+    parser.add_argument(
+        "--support-width",
+        type=float,
+        default=2.0,
+        help="Bridge support column radius (default: 2.0)",
+    )
+
     # Preprocessing arguments
     preprocess_group = parser.add_argument_group("Preprocessing options")
     preprocess_group.add_argument(
@@ -137,6 +157,11 @@ def main():
             "cluster_size": args.cluster_size,
             "height_variance": args.height_variance,
             "min_building_area": args.min_building_area,
+
+            # NEW lines for bridging:
+            "bridge_height": args.bridge_height,
+            "bridge_thickness": args.bridge_thickness,
+            "support_width": args.support_width,
         }
 
         # Create converter instance

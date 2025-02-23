@@ -12,21 +12,19 @@ const port = process.env.PORT || 3000;
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
-// Serve static files from public and output directories
+// Serve static files
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static("uploads"));
 app.use("/outputs", express.static("outputs"));
 
-// Parse URL-encoded bodies (for form submissions)
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// GET route for the index page
 app.get("/", (req, res) => {
   res.render("index");
 });
 
-// Ensure uploads and outputs directories exist
+// Ensure uploads/outputs folders exist
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
@@ -36,40 +34,36 @@ if (!fs.existsSync(outputsDir)) {
   fs.mkdirSync(outputsDir);
 }
 
-// Setup Multer for file uploads
+// Multer setup
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, "uploads/");
   },
   filename: function (req, file, cb) {
-    // Generate a unique filename to avoid collisions
     const uniqueSuffix = Date.now() + "-" + uuidv4();
     cb(null, uniqueSuffix + "-" + file.originalname);
   },
 });
 const upload = multer({ storage: storage });
 
-// Endpoint to handle AJAX file upload for live preview
+// Endpoint to handle AJAX file upload
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded." });
   }
-  // Return the absolute path for the Python tool
   const filePath = path.join(__dirname, req.file.path);
   res.json({ filePath: filePath });
 });
 
-// Endpoint to generate live previews based on current form options
+// Live preview endpoint
 app.post("/preview", (req, res) => {
   const uploadedFile = req.body.uploadedFile;
   if (!uploadedFile) {
     return res.status(400).json({ error: "No uploaded file provided." });
   }
-  // Generate a unique base name for the preview outputs
   const outputBase = "preview-" + Date.now() + "-" + uuidv4();
   const outputScad = path.join(outputsDir, outputBase + ".scad");
 
-  // Build arguments for preview generation. We use --export preview.
   let args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
     uploadedFile,
@@ -78,7 +72,7 @@ app.post("/preview", (req, res) => {
     "preview",
   ];
 
-  // Add basic options if provided
+  // Basic options
   if (req.body.size) args.push("--size", req.body.size);
   if (req.body.height) args.push("--height", req.body.height);
   if (req.body.style) args.push("--style", req.body.style);
@@ -96,32 +90,38 @@ app.post("/preview", (req, res) => {
     args.push("--min-building-area", req.body["min-building-area"]);
   if (req.body.debug === "on") args.push("--debug");
 
-  // Preprocessing options
+  // NEW bridging lines
+  if (req.body["bridge-height"]) {
+    args.push("--bridge-height", req.body["bridge-height"]);
+  }
+  if (req.body["bridge-thickness"]) {
+    args.push("--bridge-thickness", req.body["bridge-thickness"]);
+  }
+  if (req.body["support-width"]) {
+    args.push("--support-width", req.body["support-width"]);
+  }
+
+  // Preprocessing
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-
-  // Process bounding box from Overpass format
   if (req.body["crop-bbox"]) {
-    // Split the input string and convert to numbers
     const bbox = req.body["crop-bbox"]
       .split(",")
       .map((coord) => coord.trim())
       .map(Number);
-
     if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
       args.push(
         "--crop-bbox",
-        bbox[0].toString(), // South
-        bbox[1].toString(), // West
-        bbox[2].toString(), // North
-        bbox[3].toString() // East
+        bbox[0].toString(),
+        bbox[1].toString(),
+        bbox[2].toString(),
+        bbox[3].toString()
       );
     }
   }
 
-  // Preview integration options
+  // Preview integration
   if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
     args.push(
       "--preview-size",
@@ -129,11 +129,15 @@ app.post("/preview", (req, res) => {
       req.body["preview-size-height"]
     );
   }
-  if (req.body["preview-file"])
+  if (req.body["preview-file"]) {
     args.push("--preview-file", req.body["preview-file"]);
-  if (req.body.watch === "on") args.push("--watch");
-  if (req.body["openscad-path"])
+  }
+  if (req.body.watch === "on") {
+    args.push("--watch");
+  }
+  if (req.body["openscad-path"]) {
     args.push("--openscad-path", req.body["openscad-path"]);
+  }
 
   console.log("Live preview generation command:", args.join(" "));
 
@@ -153,9 +157,6 @@ app.post("/preview", (req, res) => {
       console.error(stderrData);
       return res.status(500).json({ error: stderrData });
     }
-    // Assume that the Python tool creates two preview images:
-    //  - [outputBase]_preview_main.png
-    //  - [outputBase]_preview_frame.png
     const previewMain = outputBase + "_preview_main.png";
     const previewFrame = outputBase + "_preview_frame.png";
 
@@ -168,17 +169,15 @@ app.post("/preview", (req, res) => {
   });
 });
 
-// New endpoint for final model generation using the already-uploaded file
+// Final render endpoint
 app.post("/render", (req, res) => {
   const uploadedFile = req.body.uploadedFile;
   if (!uploadedFile) {
     return res.status(400).json({ error: "No uploaded file provided." });
   }
-  // Generate a unique output base name (without extension)
   const outputBase = "output-" + Date.now() + "-" + uuidv4();
   const outputPath = path.join(outputsDir, outputBase + ".scad");
 
-  // Build arguments for the Python tool:
   let args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
     uploadedFile,
@@ -203,27 +202,33 @@ app.post("/render", (req, res) => {
     args.push("--min-building-area", req.body["min-building-area"]);
   if (req.body.debug === "on") args.push("--debug");
 
-  // Preprocessing options
+  // NEW bridging lines
+  if (req.body["bridge-height"]) {
+    args.push("--bridge-height", req.body["bridge-height"]);
+  }
+  if (req.body["bridge-thickness"]) {
+    args.push("--bridge-thickness", req.body["bridge-thickness"]);
+  }
+  if (req.body["support-width"]) {
+    args.push("--support-width", req.body["support-width"]);
+  }
+
+  // Preprocessing
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-
-  // Process bounding box from Overpass format
   if (req.body["crop-bbox"]) {
-    // Split the input string and convert to numbers
     const bbox = req.body["crop-bbox"]
       .split(",")
       .map((coord) => coord.trim())
       .map(Number);
-
     if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
       args.push(
         "--crop-bbox",
-        bbox[0].toString(), // South
-        bbox[1].toString(), // West
-        bbox[2].toString(), // North
-        bbox[3].toString() // East
+        bbox[0].toString(),
+        bbox[1].toString(),
+        bbox[2].toString(),
+        bbox[3].toString()
       );
     }
   }
@@ -234,7 +239,7 @@ app.post("/render", (req, res) => {
   if (req.body["no-repair"] === "on") args.push("--no-repair");
   if (req.body.force === "on") args.push("--force");
 
-  // Preview and Integration options
+  // Preview & integration
   if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
     args.push(
       "--preview-size",
@@ -242,11 +247,15 @@ app.post("/render", (req, res) => {
       req.body["preview-size-height"]
     );
   }
-  if (req.body["preview-file"])
+  if (req.body["preview-file"]) {
     args.push("--preview-file", req.body["preview-file"]);
-  if (req.body.watch === "on") args.push("--watch");
-  if (req.body["openscad-path"])
+  }
+  if (req.body.watch === "on") {
+    args.push("--watch");
+  }
+  if (req.body["openscad-path"]) {
     args.push("--openscad-path", req.body["openscad-path"]);
+  }
 
   console.log("Final render command:", args.join(" "));
 
@@ -266,15 +275,10 @@ app.post("/render", (req, res) => {
       console.error(stderrData);
       return res.status(500).json({ error: stderrData });
     }
-    // Assume that the Python tool creates:
-    //  - [outputBase]_main.scad
-    //  - [outputBase]_frame.scad
-    //  - [outputBase].scad.log
     const mainScad = outputBase + "_main.scad";
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
-    // Include STL download links if export mode is "stl" or "both"
     let stlFiles = {};
     if (req.body.export === "stl" || req.body.export === "both") {
       const mainStl = outputBase + "_main.stl";
@@ -296,7 +300,7 @@ app.post("/render", (req, res) => {
   });
 });
 
-// Fallback /upload endpoint (if needed for non-AJAX uploads)
+// Fallback /upload endpoint (if needed)
 app.post("/upload", upload.single("geojson"), (req, res) => {
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
