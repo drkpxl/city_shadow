@@ -152,14 +152,15 @@ def main():
         # Set up OpenSCAD integration
         integration = OpenSCADIntegration()
 
-        # Generate preview images with fixed size
+       # Hardcoded preview settings
+        preview_size = [1080, 1080]  # Fixed image size
         preview_file = args.output_scad.replace(".scad", "_preview.png")
-        print("\nGenerating preview image...")
-        integration.generate_preview(
-            args.output_scad, preview_file, size=[1080, 1080]
-        )
 
-        # Generate STL files
+        # Generate preview images
+        print("\nGenerating preview image...")
+        integration.generate_preview(args.output_scad, preview_file, size=preview_size)
+
+        # Generate STL files (using export_manager.py)
         print("\nGenerating STL files...")
         stl_file = args.output_scad.replace(".scad", ".stl")
         integration.generate_stl(args.output_scad, stl_file)
