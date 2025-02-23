@@ -47,10 +47,6 @@ class FeatureProcessor:
         for feature in geojson_data["features"]:
             props = feature.get("properties", {})
 
-            # Coastline
-            if props.get("natural") == "coastline":
-                self.water_proc.process_coastline(feature, features, transform)
-                continue
 
             # Water (e.g., rivers, lakes, ponds)
             if props.get("natural") == "water":
@@ -86,9 +82,6 @@ class FeatureProcessor:
             if props.get("landuse") == "industrial":
                 self.industrial_proc.process_industrial_area(feature, features, transform)
 
-        # After collecting everything, build the “ocean” polygon(s) from coastlines
-        bounding_polygon = self._compute_bounding_polygon(size)
-        self.water_proc.build_ocean_polygons(bounding_polygon, features)
 
         # Store features in style manager (so merges can see them)
         self.style_manager.set_current_features(features)

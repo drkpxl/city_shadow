@@ -1,4 +1,4 @@
-# **init**.py
+# __init__.py
 
 ```py
 
@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
 ```
 
-# lib/**init**.py
+# lib/__init__.py
 
 ```py
 
@@ -399,7 +399,7 @@ class EnhancedCityConverter:
 difference() {{
     // Outer block (10mm larger than main model)
     cube([{frame_size}, {frame_size}, {height}]);
-
+    
     // Inner cutout (sized to match main model exactly)
     translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
@@ -407,7 +407,7 @@ difference() {{
 
 ```
 
-# lib/feature_processor/**init**.py
+# lib/feature_processor/__init__.py
 
 ```py
 # lib/feature_processor/__init__.py
@@ -553,10 +553,6 @@ class FeatureProcessor:
         for feature in geojson_data["features"]:
             props = feature.get("properties", {})
 
-            # Coastline
-            if props.get("natural") == "coastline":
-                self.water_proc.process_coastline(feature, features, transform)
-                continue
 
             # Water (e.g., rivers, lakes, ponds)
             if props.get("natural") == "water":
@@ -592,9 +588,6 @@ class FeatureProcessor:
             if props.get("landuse") == "industrial":
                 self.industrial_proc.process_industrial_area(feature, features, transform)
 
-        # After collecting everything, build the “ocean” polygon(s) from coastlines
-        bounding_polygon = self._compute_bounding_polygon(size)
-        self.water_proc.build_ocean_polygons(bounding_polygon, features)
 
         # Store features in style manager (so merges can see them)
         self.style_manager.set_current_features(features)
@@ -781,138 +774,28 @@ class RoadProcessor(BaseProcessor):
 # lib/feature_processor/water_processor.py
 
 ```py
-# lib/feature_processor/water_processor.py
-from shapely.geometry import LineString, Polygon
-from shapely.ops import unary_union
-
 from .base_processor import BaseProcessor
 
-
-
 class WaterProcessor(BaseProcessor):
     def process_water(self, feature, features, transform):
-        """Process a natural water feature."""
+        # Extract props and coords from the incoming `feature`
         props = feature.get("properties", {})
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
-        if props.get("natural") != "water":
-            return
-
+        # Apply the coordinate transform
         transformed = [transform(lon, lat) for lon, lat in coords]
+
+        # If it's large enough to be considered water
         if len(transformed) >= 3:
-            features["water"].append({"coords": transformed, "type": props.get("water", "unknown")})
+            features["water"].append({
+                "coords": transformed,
+                "type": props.get("water", "unknown")
+            })
             if self.debug:
-                print(f"Added water feature, {len(transformed)} points")
+                print(f"Added water feature with {len(transformed)} points")
 
-class WaterProcessor(BaseProcessor):
-    def __init__(self, geometry_utils, style_manager, debug=False):
-        super().__init__(geometry_utils, style_manager, debug)
-        self.coastline_segments = []  # store coastline lines here
-
-    def process_water(self, feature, features, transform):
-        """Process a natural water feature (lakes, rivers, ponds, etc.)."""
-        props = feature.get("properties", {})
-        coords = self.geometry.extract_coordinates(feature)
-        if not coords:
-            return
-
-        # The existing "natural=water" logic remains unchanged.
-        if props.get("natural") == "water":
-            transformed = [transform(lon, lat) for lon, lat in coords]
-            if len(transformed) >= 3:
-                features["water"].append(
-                    {"coords": transformed, "type": props.get("water", "unknown")}
-                )
-                if self.debug:
-                    print(f"Added water feature, {len(transformed)} points")
-
-    def process_coastline(self, feature, features, transform):
-        """
-        Capture coastline segments (LineStrings).
-        We'll build ocean polygons later in a separate step.
-        """
-        coords = self.geometry.extract_coordinates(feature)
-        if not coords:
-            return
-
-        # Coastlines in OSM are usually stored as LineString(s)
-        transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) < 2:
-            return
-
-        self.coastline_segments.append(transformed)
-        if self.debug:
-            print(f"Captured coastline segment with {len(transformed)} points")
-
-    def build_ocean_polygons(self, bounding_polygon, features):
-        """
-        After all features have been processed, call this to create an
-        'ocean' polygon that fills everything outside the coastline but
-        within the bounding_polygon.
-
-        bounding_polygon: Shapely Polygon that covers the entire area
-                          you want to treat as 'ocean' if not land.
-        """
-        if not self.coastline_segments:
-            return  # No coastlines to process
-
-        # 1) Turn each coastline segment into a Shapely LineString
-        lines = [LineString(seg) for seg in self.coastline_segments]
-
-        # 2) Merge them all into one unified geometry
-        coastline_union = unary_union(lines)
-
-        # If the coastlines are not perfectly connected, or if you have
-        # inlets/broken segments, you might need additional bridging/buffering
-        # logic to close them. For now, we assume the union forms a boundary
-        # that encloses the land or ocean area in some consistent way.
-
-        # 3) Convert that union of lines into polygon(s). One approach:
-        #    - Buffer the coastline lines outward to get a closed ring.
-        #    - Then intersect that with the bounding polygon to produce water on
-        #      one side (depending on whether your buffer is inside or outside).
-        #    The direction depends on whether you want the “outside” to be ocean
-        #    or the “inside” to be ocean. Typical OSM convention is that coastline
-        #    lines go clockwise for water on the right (depending on data).
-        #
-        #    A simple approach is to fill everything outside the lines:
-        #        ocean_area = bounding_polygon.difference(land_polygons)
-        #    but if you do not explicitly have land polygons, you can try buffering
-        #    the coastline lines inside or outside and subtract that from bounding_box.
-
-        # Example: Just do a small outward buffer, and let that define the “land edge,”
-        # then take the difference from bounding_polygon to get the ocean polygon.
-
-        # For clarity in a minimal example, do something like:
-        coastline_poly = coastline_union.buffer(0.0001)  # small outward buffer
-        ocean_polygon = bounding_polygon.difference(coastline_poly)
-        print("Coastline union is valid?", coastline_union.is_valid)
-        print("Coastline union geometry type:", coastline_union.geom_type)
-
-        if ocean_polygon.is_empty:
-            if self.debug:
-                print("Ocean polygon ended up empty—coastline might be incomplete.")
-            return
-
-        # 4) Save the final polygon(s) to features["water"].
-        # ocean_polygon could be MultiPolygon if there are multiple unconnected areas.
-        if ocean_polygon.geom_type == "Polygon":
-            # Single polygon
-            poly_coords = list(ocean_polygon.exterior.coords)
-            features["water"].append({"coords": poly_coords, "type": "ocean"})
-            if self.debug:
-                print(f"Built ocean polygon with {len(poly_coords)} points")
-
-        elif ocean_polygon.geom_type == "MultiPolygon":
-            # Multiple polygons
-            for geom in ocean_polygon.geoms:
-                if geom.geom_type == "Polygon":
-                    poly_coords = list(geom.exterior.coords)
-                    features["water"].append({"coords": poly_coords, "type": "ocean"})
-                    if self.debug:
-                        print(f"Built ocean sub-polygon with {len(poly_coords)} points")
 ```
 
 # lib/geometry.py
@@ -1250,7 +1133,7 @@ if __name__ == "__main__":
 
 ```
 
-# lib/preview/**init**.py
+# lib/preview/__init__.py
 
 ```py
 from .openscad_integration import OpenSCADIntegration
@@ -1704,7 +1587,7 @@ difference() {{
         // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-
+        
         // Roof details (mechanical equipment, etc.)
         translate([0, 0, {height}]) {{
             linear_extrude(height=1.2, convexity=2)
@@ -1719,7 +1602,7 @@ difference() {{
         // Main structure
         linear_extrude(height={height * 0.8}, convexity=2)
             polygon([{points_str}]);
-
+        
         // Sawtooth roof
         translate([0, 0, {height * 0.8}])
             linear_extrude(height={height * 0.2}, convexity=2)
@@ -1733,7 +1616,7 @@ difference() {{
         // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
-
+        
         // Simple roof edge
         translate([0, 0, {height - 0.5}])
             linear_extrude(height=0.5, convexity=2)
@@ -1824,7 +1707,7 @@ difference() {{
         base_height = layer_specs["base"]["height"]
         bridge_height = 2.0  # Height above base
         bridge_thickness = 1  # Thickness for stability
-        support_width = 3.0  # Width of bridge supports
+        support_width = 2.0  # Width of bridge supports
         road_width = layer_specs["roads"]["width"]
 
         for i, bridge in enumerate(bridge_features):
@@ -1845,7 +1728,7 @@ difference() {{
             translate([0, 0, {base_height + bridge_height}])
                 linear_extrude(height={bridge_thickness}, convexity=2)
                     polygon([{points_str}]);
-
+            
             // Bridge supports
             translate([{start_point[0]}, {start_point[1]}, {base_height}])
                 cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
@@ -2086,7 +1969,7 @@ class StyleManager:
 
 ```
 
-# lib/style/**init**.py
+# lib/style/__init__.py
 
 ```py
 from .style_manager import StyleManager
@@ -2573,6 +2456,7 @@ class StyleManager:
     "uuid": "^9.0.0"
   }
 }
+
 ```
 
 # psl
@@ -2586,6 +2470,7 @@ body {
   padding-top: 20px;
   padding-bottom: 20px;
 }
+
 ```
 
 # README.md
@@ -2602,50 +2487,40 @@ python geojson_to_shadow_city.py input.geojson output.scad [options]
 \`\`\`
 
 This creates:
-
 - `output_main.scad` - The city model
 - `output_frame.scad` - A decorative frame that fits around the model
 
 ### Basic Export Example
 
 \`\`\`bash
-
 # Generate both preview and STL files with modern style
-
 python geojson_to_shadow_city.py map.geojson output.scad \
- --export both \
- --style modern \
- --size 200 \
- --water-depth 3 \
- --road-width 1
+    --export both \
+    --style modern \
+    --size 200 \
+    --water-depth 3 \
+    --road-width 1
 \`\`\`
 
 ## Export Options
 
 ### Preview Generation
-
 \`\`\`bash
-
 # Generate preview images
-
 python geojson_to_shadow_city.py map.geojson output.scad \
- --export preview \
- --preview-size 1920 1080
+    --export preview \
+    --preview-size 1920 1080
 \`\`\`
 
 ### STL Export
-
 \`\`\`bash
-
 # Generate high-quality STL files
-
 python geojson_to_shadow_city.py map.geojson output.scad \
- --export stl \
- --style classic
+    --export stl \
+    --style classic
 \`\`\`
 
 Creates:
-
 - `output_main.stl` - Main city model
 - `output_frame.stl` - Decorative frame
 
@@ -2656,145 +2531,128 @@ The STL files are generated using OpenSCAD's Manifold backend for optimal qualit
 The Shadow City Generator includes preprocessing capabilities to help you refine your input data before generating the 3D model.
 
 ### Distance-Based Cropping
-
 Crop features to a specific radius from the center point:
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
- --preprocess \
- --crop-distance 1000 # Crop to 1000 meters from center
+    --preprocess \
+    --crop-distance 1000  # Crop to 1000 meters from center
 \`\`\`
 
 ### Bounding Box Cropping
-
 Crop features to a specific geographic area:
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
- --preprocess \
- --crop-bbox 51.5074 -0.1278 51.5174 -0.1178 # south west north east
+    --preprocess \
+    --crop-bbox 51.5074 -0.1278 51.5174 -0.1178  # south west north east
 \`\`\`
 
 ## Artistic Options
 
 ### Overall Style
-
 \`\`\`bash
 --style [modern|classic|minimal]
 \`\`\`
-
 - `modern`: Sharp, angular designs with contemporary architectural details
 - `classic`: Softer edges with traditional architectural elements
 - `minimal`: Clean, simplified shapes without additional ornamentation
 
 ### Size and Scale
-
 \`\`\`bash
---size 200 # Size of the model in millimeters (default: 200)
---height 20 # Maximum height of buildings in millimeters (default: 20)
+--size 200        # Size of the model in millimeters (default: 200)
+--height 20       # Maximum height of buildings in millimeters (default: 20)
 \`\`\`
 
 ### Detail and Complexity
-
 \`\`\`bash
---detail 1.0 # Detail level from 0-2 (default: 1.0)
+--detail 1.0      # Detail level from 0-2 (default: 1.0)
 \`\`\`
 Higher values add more intricate architectural details and smoother transitions between elements.
 
 ### Building Features
 
 #### Building Size Selection
-
 \`\`\`bash
 --min-building-area 600
 \`\`\`
 Controls which buildings are included:
-
 - Low values (200-400): Include small buildings like houses and shops
 - Medium values (600-800): Focus on medium-sized structures
 - High values (1000+): Show only larger buildings like offices and apartments
 
 #### Artistic Building Combinations
-
 \`\`\`bash
 --merge-distance 2.0
 \`\`\`
 Controls how buildings are combined:
-
 - `0`: Each building stands alone
 - `1-2`: Nearby buildings gently blend together
 - `3-5`: Buildings flow into each other more dramatically
 - `6+`: Creates bold, abstract representations
 
 #### Height Artistry
-
 \`\`\`bash
 --height-variance 0.2
 \`\`\`
 Controls building height variations:
-
 - `0.0`: Uniform heights within groups
 - `0.1-0.2`: Subtle height variations
 - `0.3-0.5`: More dramatic height differences
 - `0.6+`: Bold, artistic height variations
 
 ### Road and Water Features
-
 \`\`\`bash
---road-width 2.0 # Width of roads in millimeters (default: 2.0)
---water-depth 1.4 # Depth of water features in millimeters (default: 1.4)
+--road-width 2.0          # Width of roads in millimeters (default: 2.0)
+--water-depth 1.4         # Depth of water features in millimeters (default: 1.4)
 \`\`\`
 
 ### Building Clusters
-
 \`\`\`bash
---cluster-size 3.0 # Size threshold for building clusters (default: 3.0)
+--cluster-size 3.0        # Size threshold for building clusters (default: 3.0)
 \`\`\`
 
 ## Creative Examples
 
 ### Contemporary Downtown
-
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
- --preprocess \
- --crop-distance 800 \
- --style modern \
- --detail 0.5 \
- --merge-distance 0 \
- --min-building-area 1000 \
- --road-width 1.5 \
- --export both
+    --preprocess \
+    --crop-distance 800 \
+    --style modern \
+    --detail 0.5 \
+    --merge-distance 0 \
+    --min-building-area 1000 \
+    --road-width 1.5 \
+    --export both
 \`\`\`
 
 ### Historic District
-
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
- --style classic \
- --detail 1.5 \
- --merge-distance 3 \
- --min-building-area 400 \
- --height-variance 0.3 \
- --export stl
+    --style classic \
+    --detail 1.5 \
+    --merge-distance 3 \
+    --min-building-area 400 \
+    --height-variance 0.3 \
+    --export stl
 \`\`\`
 
 ### Minimalist Urban Plan
-
 \`\`\`bash
 python geojson_to_shadow_city.py input.geojson output.scad \
- --style minimal \
- --detail 0.3 \
- --merge-distance 0 \
- --road-width 1.5 \
- --water-depth 2 \
- --export both
+    --style minimal \
+    --detail 0.3 \
+    --merge-distance 0 \
+    --road-width 1.5 \
+    --water-depth 2 \
+    --export both
 \`\`\`
 
 ## Installation
 
 1. Install Python dependencies:
-   \`\`\`bash
-   pip install -r requirements.txt
-   \`\`\`
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
 
 2. Install OpenSCAD:
    - Windows: Download from openscad.org
@@ -2804,19 +2662,15 @@ python geojson_to_shadow_city.py input.geojson output.scad \
 ## 3D Printing Guide
 
 ### Print Settings
-
-1. **Layer Height**:
-
+1. **Layer Height**: 
    - 0.2mm for good detail
    - 0.12mm for extra detail in complex areas
 
 2. **Infill**:
-
    - Main model: 10-15%
    - Frame: 20% for stability
 
 3. **Support Settings**:
-
    - Main model: Support on build plate only
    - Frame: Usually no supports needed
 
@@ -2825,7 +2679,6 @@ python geojson_to_shadow_city.py input.geojson output.scad \
    - Consider using contrasting colors for main model and frame
 
 ### Assembly Tips
-
 1. Print the main model (`*_main.stl`) and frame (`*_frame.stl`) separately
 2. The frame has a 5mm border and will be slightly larger than the main model
 3. Clean any support material carefully, especially from the frame
@@ -2836,13 +2689,11 @@ python geojson_to_shadow_city.py input.geojson output.scad \
 ### Common Issues
 
 1. **Long Processing Times**:
-
    - Reduce `--detail` level
    - Increase `--min-building-area`
    - Use `--crop-distance` to limit area
 
 2. **Memory Issues**:
-
    - Use `--preprocess` with smaller areas
    - Increase `--min-building-area`
    - Reduce `--detail` level
@@ -2855,7 +2706,6 @@ python geojson_to_shadow_city.py input.geojson output.scad \
 ### Getting Help
 
 If you encounter issues:
-
 1. Enable debug output with `--debug`
 2. Check the generated log file (`*.log`)
 3. Verify OpenSCAD installation
@@ -2991,19 +2841,25 @@ app.post("/preview", (req, res) => {
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-  if (
-    req.body.crop_bbox1 &&
-    req.body.crop_bbox2 &&
-    req.body.crop_bbox3 &&
-    req.body.crop_bbox4
-  ) {
-    args.push(
-      "--crop-bbox",
-      req.body.crop_bbox1,
-      req.body.crop_bbox2,
-      req.body.crop_bbox3,
-      req.body.crop_bbox4
-    );
+
+  // Process bounding box from Overpass format
+  if (req.body["crop-bbox"]) {
+    // Split the input string and convert to numbers
+    const bbox = req.body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
+      args.push(
+        "--crop-bbox",
+        bbox[0].toString(), // South
+        bbox[1].toString(), // West
+        bbox[2].toString(), // North
+        bbox[3].toString() // East
+      );
+    }
   }
 
   // Preview integration options
@@ -3092,19 +2948,25 @@ app.post("/render", (req, res) => {
   if (req.body.preprocess === "on") args.push("--preprocess");
   if (req.body["crop-distance"])
     args.push("--crop-distance", req.body["crop-distance"]);
-  if (
-    req.body.crop_bbox1 &&
-    req.body.crop_bbox2 &&
-    req.body.crop_bbox3 &&
-    req.body.crop_bbox4
-  ) {
-    args.push(
-      "--crop-bbox",
-      req.body.crop_bbox1,
-      req.body.crop_bbox2,
-      req.body.crop_bbox3,
-      req.body.crop_bbox4
-    );
+
+  // Process bounding box from Overpass format
+  if (req.body["crop-bbox"]) {
+    // Split the input string and convert to numbers
+    const bbox = req.body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      // Reorder from Overpass format (S,W,N,E) to required format (S,W,N,E)
+      args.push(
+        "--crop-bbox",
+        bbox[0].toString(), // South
+        bbox[1].toString(), // West
+        bbox[2].toString(), // North
+        bbox[3].toString() // East
+      );
+    }
   }
 
   // Export options
@@ -3153,7 +3015,7 @@ app.post("/render", (req, res) => {
     const frameScad = outputBase + "_frame.scad";
     const logFile = outputBase + ".scad.log";
 
-    // New: include STL download links if export mode is "stl" or "both"
+    // Include STL download links if export mode is "stl" or "both"
     let stlFiles = {};
     if (req.body.export === "stl" || req.body.export === "both") {
       const mainStl = outputBase + "_main.stl";
@@ -3186,6 +3048,7 @@ app.post("/upload", upload.single("geojson"), (req, res) => {
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
+
 ```
 
 # views/index.ejs
@@ -3276,6 +3139,7 @@ app.listen(port, () => {
                 <option value="modern" selected>Modern</option>
                 <option value="classic">Classic</option>
                 <option value="minimal">Minimal</option>
+                <option value="block-combine">Block Combine</option>
               </select>
             </div>
             <div class="form-group">
@@ -3331,25 +3195,9 @@ app.listen(port, () => {
               <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
             </div>
             <div class="form-group">
-              <label>Crop Bounding Box (SOUTH, WEST, NORTH, EAST)</label>
-              <div class="form-row">
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="South"
-                    name="crop_bbox1">
-                </div>
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="West"
-                    name="crop_bbox2">
-                </div>
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="North"
-                    name="crop_bbox3">
-                </div>
-                <div class="col">
-                  <input type="number" step="0.0001" class="form-control live-preview" placeholder="East"
-                    name="crop_bbox4">
-                </div>
-              </div>
+              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
+              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
+                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
             </div>
           </fieldset>
 
@@ -3636,3 +3484,4 @@ app.listen(port, () => {
 
 </html>
 ```
+
