@@ -44,6 +44,7 @@ class ExportManager:
         command = [
             self.openscad_path,
             "--backend=Manifold",
+            "--render",
             "--export-format=binstl",
             "-o",
             output_file,
