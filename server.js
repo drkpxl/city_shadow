@@ -20,10 +20,6 @@ app.use("/outputs", express.static("outputs"));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.render("index");
-});
-
 // Ensure uploads/outputs folders exist
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
@@ -34,7 +30,7 @@ if (!fs.existsSync(outputsDir)) {
   fs.mkdirSync(outputsDir);
 }
 
-// Multer setup
+// Configure Multer storage
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, "uploads/");
@@ -44,12 +40,36 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + "-" + file.originalname);
   },
 });
-const upload = multer({ storage: storage });
+
+// Only allow .geojson files
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === ".geojson") {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid file type. Only .geojson files are allowed."));
+  }
+}
+
+// Create Multer instance with storage + fileFilter
+const upload = multer({ storage: storage, fileFilter: fileFilter });
+
+// -------------------------------------
+// ROUTES
+// -------------------------------------
+
+// Home route
+app.get("/", (req, res) => {
+  res.render("index");
+});
 
 // Endpoint to handle AJAX file upload
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
+  // If Multer’s fileFilter rejects the file, req.file will be undefined
   if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded." });
+    return res
+      .status(400)
+      .json({ error: "No valid .geojson file was uploaded." });
   }
   const filePath = path.join(__dirname, req.file.path);
   res.json({ filePath: filePath });
@@ -303,11 +323,12 @@ app.post("/render", (req, res) => {
 // Fallback /upload endpoint (if needed)
 app.post("/upload", upload.single("geojson"), (req, res) => {
   if (!req.file) {
-    return res.status(400).send("No file uploaded.");
+    return res.status(400).send("No valid .geojson file was uploaded.");
   }
   res.redirect("/");
 });
 
+// Start the server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
