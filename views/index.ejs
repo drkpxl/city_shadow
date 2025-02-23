@@ -286,7 +286,7 @@
         return;
       }
 
-      $("#liveLog").text("Generating preview...");
+      updateLog("Generating preview...");
 
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
@@ -309,14 +309,27 @@
             logText += data.stderr + "\n";
           }
           if (logText.trim().length > 0) {
-            $("#liveLog").text(logText);
+            updateLog(logText);
           }
         },
         error: function (err) {
           console.error("Preview update error:", err);
-          $("#liveLog").text("Error generating preview:\n" + JSON.stringify(err));
+          updateLog("Error generating preview:\n" + JSON.stringify(err));
         }
       });
+    }
+
+    // Function to auto-scroll log to the newest entry
+    function scrollToBottom() {
+      var logContainer = $("#liveLog");
+      logContainer.scrollTop(logContainer[0].scrollHeight);
+    }
+
+    // Function to append new log entries and auto-scroll
+    function updateLog(text) {
+      var logContainer = $("#liveLog");
+      logContainer.append(text + "\n"); // Append new log entries
+      scrollToBottom(); // Auto-scroll to bottom
     }
 
     // Create debounced version of updatePreview with 2 second delay
@@ -344,7 +357,7 @@
         },
         error: function (err) {
           console.error("File upload error:", err);
-          $("#liveLog").text("Error uploading file:\n" + JSON.stringify(err));
+          updateLog("Error uploading file:\n" + JSON.stringify(err));
         }
       });
     });
@@ -362,7 +375,7 @@
         return;
       }
 
-      $("#liveLog").text("Generating final render...");
+      updateLog("Generating final render...");
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
 
@@ -401,16 +414,17 @@
             logText += data.stderr + "\n";
           }
           if (logText.trim().length > 0) {
-            $("#liveLog").text(logText);
+            updateLog(logText);
           }
         },
         error: function (err) {
           console.error("Final render error:", err);
-          $("#liveLog").text("Error during final render:\n" + JSON.stringify(err));
+          updateLog("Error during final render:\n" + JSON.stringify(err));
           alert("An error occurred during final render.");
         }
       });
     });
+
   </script>
 </body>
 

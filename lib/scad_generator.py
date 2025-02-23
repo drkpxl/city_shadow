@@ -54,26 +54,32 @@ difference() {{
                 continue
 
             building_height = building["height"]
-            block_type = building.get("block_type", "residential")
-            roof_style = building.get("roof_style", None)
+            roof_style = building.get("roof_style")
+            roof_params = building.get("roof_params")
+            is_cluster = building.get("is_cluster", False)
 
-            details = self.building_generator.generate_building_details(
-                points_str, 
-                building_height, 
-                roof_style=roof_style,
-                block_type=block_type
-            )
+            # Generate the building details with explicit roof style if it's a cluster
+            if is_cluster and roof_style and roof_params:
+                details = self.building_generator.generate_building_details(
+                    points_str=points_str,
+                    height=building_height,
+                    roof_style=roof_style,
+                    roof_params=roof_params
+                )
+            else:
+                details = self.building_generator.generate_building_details(
+                    points_str=points_str,
+                    height=building_height
+                )
 
-            scad.append(
-                f"""
-    // Building {i+1}
-    translate([0, 0, {base_height}]) {{
-        color("white")
-        {{
-            {details}
-        }}
-    }}"""
-            )
+            scad.append(f"""
+            // Building {i+1} {'(Merged Cluster)' if is_cluster else ''}
+            translate([0, 0, {base_height}]) {{
+                color("white")
+                {{
+                    {details}
+                }}
+            }}""")
 
         return "\n".join(scad)
 

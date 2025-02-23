@@ -516,7 +516,8 @@ class BuildingProcessor(BaseProcessor):
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
-        if area_m2 < min_area:
+        # Only skip small buildings if not using block-combine style.
+        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
             if self.debug:
                 print(f"Skipping small building with area {area_m2:.1f}m²")
             return
@@ -677,11 +678,11 @@ class IndustrialProcessor(BaseProcessor):
         if not coords:
             return
 
-        # Get area and check against minimum
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
-        if area_m2 < min_area:
+        # Only skip small industrial buildings if not in block-combine mode.
+        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
             if self.debug:
                 print(f"Skipping small industrial building with area {area_m2:.1f}m²")
             return
@@ -726,19 +727,17 @@ class IndustrialProcessor(BaseProcessor):
         if landuse not in self.INDUSTRIAL_LANDUSE:
             return
 
-        # Transform coordinates
         transformed = [transform(lon, lat) for lon, lat in coords]
 
-        # Calculate area and filter small areas
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
-        if area_m2 < min_area:
+        # Only skip small industrial areas if not using block-combine style.
+        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
             if self.debug:
                 print(f"Skipping small industrial area with area {area_m2:.1f}m²")
             return
 
-        # Set height based on landuse type
         layer_specs = self.style_manager.get_default_layer_specs()
         min_height = layer_specs["buildings"]["min_height"]
         max_height = layer_specs["buildings"]["max_height"]
@@ -785,7 +784,6 @@ class IndustrialProcessor(BaseProcessor):
 
     def _get_explicit_height(self, properties):
         """Extract explicit height from properties if available."""
-        # Check explicit height tag
         if "height" in properties:
             try:
                 height_str = properties["height"].split()[0]  # Handle "10 m" format
@@ -793,7 +791,6 @@ class IndustrialProcessor(BaseProcessor):
             except (ValueError, IndexError):
                 pass
                 
-        # Check building levels
         if "building:levels" in properties:
             try:
                 levels = float(properties["building:levels"])
@@ -802,6 +799,7 @@ class IndustrialProcessor(BaseProcessor):
                 pass
                 
         return None
+
 ```
 
 # lib/feature_processor/park_processor.py
@@ -1677,26 +1675,32 @@ difference() {{
                 continue
 
             building_height = building["height"]
-            block_type = building.get("block_type", "residential")
-            roof_style = building.get("roof_style", None)
+            roof_style = building.get("roof_style")
+            roof_params = building.get("roof_params")
+            is_cluster = building.get("is_cluster", False)
 
-            details = self.building_generator.generate_building_details(
-                points_str, 
-                building_height, 
-                roof_style=roof_style,
-                block_type=block_type
-            )
+            # Generate the building details with explicit roof style if it's a cluster
+            if is_cluster and roof_style and roof_params:
+                details = self.building_generator.generate_building_details(
+                    points_str=points_str,
+                    height=building_height,
+                    roof_style=roof_style,
+                    roof_params=roof_params
+                )
+            else:
+                details = self.building_generator.generate_building_details(
+                    points_str=points_str,
+                    height=building_height
+                )
 
-            scad.append(
-                f"""
-    // Building {i+1}
-    translate([0, 0, {base_height}]) {{
-        color("white")
-        {{
-            {details}
-        }}
-    }}"""
-            )
+            scad.append(f"""
+            // Building {i+1} {'(Merged Cluster)' if is_cluster else ''}
+            translate([0, 0, {base_height}]) {{
+                color("white")
+                {{
+                    {details}
+                }}
+            }}""")
 
         return "\n".join(scad)
 
@@ -2177,6 +2181,7 @@ class ArtisticEffects:
 
 ```py
 # lib/style/block_combiner.py
+from math import sqrt
 import random
 from shapely.geometry import Polygon, MultiPolygon, LineString, box
 from shapely.ops import unary_union
@@ -2185,20 +2190,28 @@ from ..geometry import GeometryUtils
 
 class BlockCombiner:
     """
-    This class handles the combination of building footprints.
+    Handles the combination of building footprints based on area thresholds and proximity.
     
-    For styles other than "block-combine", it uses the legacy block subdivision logic.
-    For "block-combine" style, it performs area-based merging:
-      1. If a footprint’s area is >= 1000 m², it is left unmerged.
-      2. If it is smaller, it is merged with nearby unblocked footprints until the
-         unioned polygon’s area is at least 1000 m².
-      3. If the merged union is a MultiPolygon, the largest polygon is used.
-      4. A random roof style is assigned to merged clusters.
+    This class implements two main approaches:
+    1. Area-based merging for "block-combine" style
+    2. Legacy block subdivision for other styles
+    
+    For "block-combine" style:
+    - Large footprints (area >= threshold) are preserved individually
+    - Small footprints are merged with nearby unblocked footprints until reaching the threshold
+    - Merged clusters get unique roof styles
     """
+    
     def __init__(self, style_manager):
+        """
+        Initialize the BlockCombiner.
+        
+        Args:
+            style_manager: StyleManager instance for accessing global style settings
+        """
         self.style_manager = style_manager
         self.geometry = GeometryUtils()
-        self.debug = False  # Enable to print debug messages
+        self.debug = False
         
         # Legacy block types for non-"block-combine" styles
         self.BLOCK_TYPES = {
@@ -2231,46 +2244,130 @@ class BlockCombiner:
             }
         }
     
+    def _select_random_roof(self):
+        """
+        Select a random roof style with randomized parameters.
+        
+        Returns:
+            dict: Roof style parameters including name and style-specific parameters
+        """
+        roof_styles = [
+            {
+                'name': 'pitched',
+                'height_factor': random.uniform(0.2, 0.4)
+            },
+            {
+                'name': 'tiered',
+                'levels': random.randint(2, 4)
+            },
+            {
+                'name': 'flat',
+                'border': random.uniform(0.8, 1.2)
+            },
+            {
+                'name': 'sawtooth',
+                'angle': random.randint(25, 35)
+            },
+            {
+                'name': 'modern',
+                'setback': random.uniform(1.8, 2.2)
+            },
+            {
+                'name': 'stepped',
+                'levels': random.randint(2, 4)
+            }
+        ]
+        return random.choice(roof_styles)
+
     def combine_buildings_by_block(self, features):
         """
-        Main entry point.
-        If artistic_style is "block-combine", use area-based merging.
-        Otherwise, use the legacy block subdivision approach.
+        Main entry point for building combination.
+        
+        Args:
+            features: Dict containing all feature types (buildings, roads, etc.)
+            
+        Returns:
+            list: Combined building features with appropriate roof styles
         """
         if self.style_manager.style.get("artistic_style") == "block-combine":
             return self._area_based_merge(features)
         else:
             return self._legacy_combine(features)
-    
+
+    def _gather_all_footprints(self, features):
+        """
+        Collect all building/industrial footprints into a unified list.
+        
+        Args:
+            features: Dict containing feature collections
+            
+        Returns:
+            list: Footprint dictionaries with polygon, height, and area information
+        """
+        footprints = []
+        
+        # Process normal building features
+        for bldg in features.get('buildings', []):
+            coords = bldg.get('coords')
+            if coords and len(coords) >= 3:
+                poly = Polygon(coords)
+                if poly.is_valid and not poly.is_empty:
+                    footprints.append({
+                        'polygon': poly,
+                        'height': bldg.get('height', 10.0),
+                        'area': poly.area,
+                        'original': bldg
+                    })
+        
+        # Process industrial features
+        for ind in features.get('industrial', []):
+            coords = ind.get('coords')
+            if coords and len(coords) >= 3:
+                poly = Polygon(coords)
+                if poly.is_valid and not poly.is_empty:
+                    footprints.append({
+                        'polygon': poly,
+                        'height': ind.get('height', 15.0),
+                        'area': poly.area,
+                        'original': ind
+                    })
+        
+        return footprints
+
     def _area_based_merge(self, features):
         """
-        Implements area-based merging.
-        Gather footprints from buildings and industrial features.
-        Any footprint with area >= 1000 m² is left alone.
-        Otherwise, small footprints (area < 1000) are merged iteratively
-        (if within merge_distance and not blocked) until the unioned area reaches 1000 m².
+        Implement area-based merging for block-combine style.
+        
+        Args:
+            features: Dict containing feature collections
+            
+        Returns:
+            list: Merged building features with appropriate roof styles
         """
-        AREA_THRESHOLD = 1000  # in m²
+        AREA_THRESHOLD = 500  # in m²
         footprints = self._gather_all_footprints(features)
         barrier_union = self._create_barrier_union(features)
         
-        # Separate into "large" (>= AREA_THRESHOLD) and "small" (< AREA_THRESHOLD)
+        # Separate large and small footprints
         large = [fp for fp in footprints if fp['area'] >= AREA_THRESHOLD]
         small = [fp for fp in footprints if fp['area'] < AREA_THRESHOLD]
         
         merged_clusters = []
         visited = set()
-        merge_dist = self.style_manager.style.get("merge_distance", 5.0)
+        merge_dist = self.style_manager.style.get("merge_distance", 20.0)
         
+        # Process small footprints
         for i, fp in enumerate(small):
             if i in visited:
                 continue
+                
             cluster = [fp]
             visited.add(i)
             cluster_union = fp['polygon']
             total_area = fp['area']
             weighted_height = fp.get('height', 10.0) * fp['area']
             
+            # Grow cluster while under threshold
             growing = True
             while growing and cluster_union.area < AREA_THRESHOLD:
                 growing = False
@@ -2278,35 +2375,54 @@ class BlockCombiner:
                     if j in visited:
                         continue
                     if candidate['polygon'].distance(cluster_union) < merge_dist:
-                        centroid_cluster = cluster_union.centroid
-                        centroid_candidate = candidate['polygon'].centroid
-                        if not self._is_blocked((centroid_cluster.x, centroid_cluster.y),
-                                                (centroid_candidate.x, centroid_candidate.y),
-                                                barrier_union):
+                        if not self._is_blocked_by_barrier(
+                            cluster_union.centroid,
+                            candidate['polygon'].centroid,
+                            barrier_union
+                        ):
                             cluster.append(candidate)
                             visited.add(j)
                             cluster_union = unary_union([cluster_union, candidate['polygon']])
-                            cluster_union = make_valid(cluster_union)  # Ensure valid polygon
+                            cluster_union = make_valid(cluster_union)
                             total_area += candidate['area']
                             weighted_height += candidate.get('height', 10.0) * candidate['area']
                             growing = True
-                # End for
-            # End while
             
-            # If the union is a MultiPolygon, select the largest polygon.
-            if cluster_union.geom_type == "MultiPolygon":
-                largest_poly = max(cluster_union.geoms, key=lambda g: g.area)
-                cluster_union = largest_poly
+            # Force merge if needed
+            if cluster_union.geom_type != "Polygon":
+                combined = cluster_union.buffer(merge_dist * 0.5).buffer(-merge_dist * 0.5)
+                if combined.geom_type != "Polygon":
+                    combined = unary_union(combined.geoms)
+                    if combined.geom_type != "Polygon":
+                        combined = combined.convex_hull
+                cluster_union = combined
+
+            # Extract coordinates for the merged shape
+            if cluster_union.geom_type == "Polygon":
+                coords = list(cluster_union.exterior.coords)[:-1]
+            else:
+                coords = list(cluster_union.convex_hull.exterior.coords)[:-1]
             
             avg_height = weighted_height / total_area if total_area > 0 else 4.0
-            merged_clusters.append({
-                'coords': list(cluster_union.exterior.coords)[:-1],
-                'height': avg_height,
-                'is_cluster': len(cluster) > 1,
-                'roof_style': self._select_random_roof() if len(cluster) > 1 else None
-            })
+            
+            # Assign unique roof style to merged clusters
+            if len(cluster) > 1:
+                roof_style = self._select_random_roof()
+                merged_clusters.append({
+                    'coords': coords,
+                    'height': avg_height,
+                    'is_cluster': True,
+                    'roof_style': roof_style['name'],
+                    'roof_params': roof_style
+                })
+            else:
+                merged_clusters.append({
+                    'coords': coords,
+                    'height': avg_height,
+                    'is_cluster': False
+                })
         
-        # Process large footprints: leave them unmerged.
+        # Process large footprints (preserve individually)
         large_buildings = []
         for fp in large:
             poly = fp['polygon']
@@ -2315,95 +2431,63 @@ class BlockCombiner:
             large_buildings.append({
                 'coords': list(poly.exterior.coords)[:-1],
                 'height': fp.get('height', 10.0),
-                'is_cluster': False,
-                'roof_style': None
+                'is_cluster': False
             })
         
         if self.debug:
-            print(f"Area-based merge: {len(large_buildings)} large buildings, {len(merged_clusters)} merged clusters.")
+            print(f"Area-based merge: {len(large_buildings)} large buildings, {len(merged_clusters)} merged clusters")
+            
         return large_buildings + merged_clusters
+
     def _legacy_combine(self, features):
         """
-        Legacy block subdivision approach.
-        (This is the original method that divides the map into blocks,
-        finds footprints in each block, and processes them.)
+        Legacy block subdivision approach for non-block-combine styles.
+        
+        Args:
+            features: Dict containing feature collections
+            
+        Returns:
+            list: Combined building features using legacy approach
         """
         if self.debug:
             print("\n=== Legacy Block Combiner Debug ===")
+        
         building_footprints = self._gather_all_footprints(features)
-        if self.debug:
-            print(f"Found {len(building_footprints)} building footprints.")
         barrier_union = self._create_barrier_union(features)
         blocks = self._create_blocks_from_barriers(barrier_union)
+        
         if self.debug:
-            print(f"Generated {len(blocks)} blocks from barrier union.")
+            print(f"Found {len(building_footprints)} building footprints")
+            print(f"Generated {len(blocks)} blocks from barrier union")
+        
         combined_buildings = []
         for block in blocks:
             block_buildings = self._find_buildings_in_block(block, building_footprints)
             block_info = self._analyze_block(block_buildings)
-            processed_shapes = self._process_block_buildings(block, block_buildings, block_info, barrier_union)
+            processed_shapes = self._process_block_buildings(
+                block, block_buildings, block_info, barrier_union
+            )
             combined_buildings.extend(processed_shapes)
+        
         return combined_buildings
-
-    def _gather_all_footprints(self, features):
-        """
-        Collect all building/industrial footprints into a unified list.
-        Each entry is a dict with keys:
-        - 'polygon': a valid shapely Polygon,
-        - 'height': building height (default 10.0 for buildings, 15.0 for industrial),
-        - 'area': computed area of the polygon.
-        """
-        from shapely.geometry import Polygon
-        from shapely.validation import make_valid
-        
-        footprints = []
-        
-        # Process normal building features.
-        for bldg in features.get('buildings', []):
-            coords = bldg.get('coords')
-            if not coords or len(coords) < 3:
-                continue
-            poly = Polygon(coords)
-            if not poly.is_valid:
-                poly = make_valid(poly)
-            if poly.is_valid and not poly.is_empty:
-                footprints.append({
-                    'polygon': poly,
-                    'height': bldg.get('height', 10.0),
-                    'area': poly.area,
-                    'original': bldg
-                })
-        
-        # Process industrial features.
-        for ind in features.get('industrial', []):
-            coords = ind.get('coords')
-            if not coords or len(coords) < 3:
-                continue
-            poly = Polygon(coords)
-            if not poly.is_valid:
-                poly = make_valid(poly)
-            if poly.is_empty or not poly.is_valid:
-                continue
-            footprints.append({
-                'polygon': poly,
-                'height': ind.get('height', 15.0),
-                'area': poly.area,
-                'original': ind
-            })
-        return footprints
 
     def _create_barrier_union(self, features):
         """
-        Create a union of barrier geometries (roads, water).
+        Create union of barrier geometries (roads, water).
+        
+        Args:
+            features: Dict containing feature collections
+            
+        Returns:
+            shapely.geometry: Union of all barrier geometries
         """
-        from shapely.ops import unary_union
         barriers = []
         
         road_width = self.style_manager.get_default_layer_specs()["roads"]["width"]
         for road in features.get('roads', []):
             try:
                 line = LineString(road["coords"])
-                buffered = line.buffer(road_width * 0.6)
+                buffered = line.buffer(road_width * 0.2)
                 if buffered.is_valid and not buffered.is_empty:
                     barriers.append(buffered)
             except Exception:
@@ -2425,28 +2509,47 @@ class BlockCombiner:
             unioned = make_valid(unioned)
         return unioned
 
-    def _is_blocked(self, ptA, ptB, barrier_union):
+    def _is_blocked_by_barrier(self, ptA, ptB, barrier_union):
         """
-        Return True if the straight-line between ptA and ptB (each a (x,y) tuple)
-        intersects the barrier union.
+        Check if line between points intersects barrier.
+        
+        Args:
+            ptA: First point (shapely.geometry.Point)
+            ptB: Second point (shapely.geometry.Point)
+            barrier_union: Union of all barriers
+            
+        Returns:
+            bool: True if line intersects barrier
         """
         if barrier_union is None:
             return False
-        line = LineString([ptA, ptB])
-        return line.intersects(barrier_union)
-    
+        try:
+            line = LineString([ptA.coords[0], ptB.coords[0]])
+            return line.intersects(barrier_union)
+        except Exception:
+            return False
+
     def _create_blocks_from_barriers(self, barrier_union):
         """
-        Legacy method: subtract the barrier union from its bounding box to create blocks.
+        Create blocks by subtracting barriers from bounding box.
+        
+        Args:
+            barrier_union: Union of all barriers
+            
+        Returns:
+            list: Block polygons
         """
         if not barrier_union or barrier_union.is_empty:
             return []
+            
         try:
             minx, miny, maxx, maxy = barrier_union.bounds
             bounding_area = box(minx, miny, maxx, maxy)
             blocks_area = bounding_area.difference(barrier_union)
+            
             if blocks_area.is_empty:
                 return []
+                
             blocks = []
             if blocks_area.geom_type == "MultiPolygon":
                 for b in blocks_area.geoms:
@@ -2459,15 +2562,24 @@ class BlockCombiner:
                     simplified = blocks_area.simplify(0.1)
                     if simplified.is_valid and not simplified.is_empty:
                         blocks.append(simplified)
+                        
             return blocks
+            
         except Exception as e:
             if self.debug:
                 print(f"Error creating blocks: {e}")
             return []
-    
+
     def _find_buildings_in_block(self, block, building_footprints):
         """
-        Legacy method: find all footprints that intersect a given block.
+        Find all footprints that intersect a given block.
+        
+        Args:
+            block: Block polygon
+            building_footprints: List of building footprints
+            
+        Returns:
+            list: Building footprints that intersect the block
         """
         block_buildings = []
         for fp in building_footprints:
@@ -2482,16 +2594,24 @@ class BlockCombiner:
             except Exception:
                 continue
         return block_buildings
-    
+
     def _analyze_block(self, block_buildings):
         """
-        Legacy method: analyze a block to compute average height and predominant type.
+        Analyze a block to compute average height and predominant type.
+        
+        Args:
+            block_buildings: List of buildings in the block
+            
+        Returns:
+            dict: Block analysis information
         """
         if not block_buildings:
             return {'type': 'residential', 'avg_height': 15.0}
+            
         type_counts = {'residential': 0, 'industrial': 0, 'commercial': 0}
         total_area = 0.0
         weighted_height = 0.0
+        
         for b in block_buildings:
             area = b['polygon'].area
             total_area += area
@@ -2501,59 +2621,90 @@ class BlockCombiner:
                 type_counts[typ] += 1
             else:
                 type_counts['residential'] += 1
+        
         block_type = max(type_counts, key=type_counts.get)
         avg_height = weighted_height / total_area if total_area > 0 else 15.0
+        
         return {
             'type': block_type,
             'avg_height': avg_height,
             'building_count': len(block_buildings),
             'total_area': total_area
         }
-    
+
     def _process_block_buildings(self, block, block_buildings, block_info, barrier_union):
         """
-        Legacy method: process footprints within a block into final building shapes.
+        Process buildings within a block into final building shapes.
+        
+        Args:
+            block: Block polygon
+            block_buildings: List of buildings in the block
+            block_info: Block analysis information
+            barrier_union: Union of all barriers
+            
+        Returns:
+            list: Processed building shapes with appropriate styles
         """
         from shapely.ops import unary_union
         if not block_buildings:
             return []
+            
         processed = []
         block_type = block_info['type']
         type_specs = self.BLOCK_TYPES.get(block_type, self.BLOCK_TYPES['residential'])
+        
         try:
+            # Create union of all building footprints
             footprints_union = unary_union([b['polygon'] for b in block_buildings])
             if not footprints_union.is_valid:
                 footprints_union = make_valid(footprints_union)
         except Exception:
             return []
+            
+        # Handle different geometry types
         polygons = []
         if footprints_union.geom_type == "MultiPolygon":
             polygons.extend(footprints_union.geoms)
         else:
             polygons.append(footprints_union)
+            
+        # Process each polygon shape
         for shape in polygons:
             if shape.is_empty or shape.area < 2:
                 continue
+                
+            # Clean up the geometry
             cleaned = shape.simplify(0.1)
             if not cleaned.is_valid or cleaned.is_empty:
                 continue
+                
+            # Buffer slightly inward to create separation
             final_poly = cleaned.buffer(-0.1)
             if final_poly.is_empty:
                 continue
+                
+            # Handle barriers if present
             if barrier_union:
                 clipped = final_poly.difference(barrier_union)
                 if clipped.is_empty:
                     continue
             else:
                 clipped = final_poly
+                
             if clipped.is_empty or clipped.area < 1:
                 continue
+                
+            # Process resulting geometry
             sub_polys = list(clipped.geoms) if clipped.geom_type=="MultiPolygon" else [clipped]
             for spoly in sub_polys:
                 if spoly.is_empty or spoly.area < 1:
                     continue
+                    
+                # Calculate height and select roof style
                 base_height = self._calculate_building_height(block_info['avg_height'], type_specs)
                 roof_style = self._select_roof_style(block_type)
+                
+                # Create final building dictionary
                 building_dict = {
                     'coords': list(spoly.exterior.coords)[:-1],
                     'height': base_height,
@@ -2562,28 +2713,50 @@ class BlockCombiner:
                     'roof_params': roof_style
                 }
                 processed.append(building_dict)
+                
         return processed
-    
+
     def _calculate_building_height(self, avg_height, type_specs):
         """
-        Legacy method: calculate building height based on average and type constraints.
+        Calculate building height based on average and type constraints.
+        
+        Args:
+            avg_height: Average height of buildings in block
+            type_specs: Building type specifications
+            
+        Returns:
+            float: Calculated building height
         """
         min_h = type_specs['min_height']
         max_h = type_specs['max_height']
+        
+        # Ensure minimum base height
         base = max(avg_height, min_h)
         if base < 15.0:
             base = 15.0
+            
+        # Add random variation
         variation = random.uniform(0.85, 1.15)
         candidate = base * variation
+        
+        # Constrain to min/max range
         final_height = max(min_h, min(candidate, max_h))
         return final_height
-    
+
     def _select_roof_style(self, block_type):
         """
-        Legacy method: randomly select a roof style from the block type's list.
+        Select a roof style for a block type, with randomized parameters.
+        
+        Args:
+            block_type: Type of building block
+            
+        Returns:
+            dict: Selected roof style parameters
         """
         styles = self.BLOCK_TYPES.get(block_type, self.BLOCK_TYPES['residential'])['roof_styles']
         choice = random.choice(styles)
+        
+        # Randomize parameters based on roof type
         if choice['name'] == 'pitched':
             choice['height_factor'] *= random.uniform(0.8, 1.2)
         elif choice['name'] == 'tiered':
@@ -2592,23 +2765,12 @@ class BlockCombiner:
             choice['border'] *= random.uniform(0.9, 1.1)
         elif choice['name'] == 'sawtooth':
             choice['angle'] = max(10, choice['angle'] + random.randint(-5, 5))
+        elif choice['name'] == 'modern':
+            choice['setback'] *= random.uniform(0.9, 1.1)
+        elif choice['name'] == 'stepped':
+            choice['levels'] = max(2, choice['levels'] + random.randint(-1, 1))
+            
         return choice
-
-    def _select_random_roof(self):
-        """
-        New helper for area-based merging: randomly select a roof style.
-        Returns a dictionary similar to legacy roof style definitions.
-        """
-        roof_styles = [
-            {'name': 'pitched', 'height_factor': 0.3},
-            {'name': 'tiered', 'levels': 2},
-            {'name': 'flat', 'border': 1.0},
-            {'name': 'sawtooth', 'angle': 30},
-            {'name': 'modern', 'setback': 2.0},
-            {'name': 'stepped', 'levels': 3}
-        ]
-        return random.choice(roof_styles)
-
 ```
 
 # lib/style/building_merger.py
@@ -2738,35 +2900,95 @@ class BuildingMerger:
 ```py
 class BuildingGenerator:
     """
-    Generates OpenSCAD code for buildings with clean, non-overlapping roofs
-    that respect block boundaries and barriers.
+    Generates OpenSCAD code for buildings with various roof styles and architectural features.
+    Each building is self-contained within its own coordinate space and can have unique
+    characteristics based on its type and parameters.
     """
     
     def __init__(self, style_manager):
+        """
+        Initialize the BuildingGenerator with a style manager.
+        
+        Args:
+            style_manager: StyleManager instance for accessing global style settings
+        """
         self.style_manager = style_manager
 
     def generate_building_details(self, points_str, height, roof_style=None, roof_params=None, block_type=None):
-        """Generate a building with appropriate roof style."""
+        """
+        Generate a building with its roof contained within its own extrusion space.
+        Each building+roof combination is self-contained and won't interfere with other features.
+        """
+        # For simple buildings, just extrude
         if not roof_style or not roof_params:
-            return self._generate_basic_building(points_str, height)
+            return f"""
+                linear_extrude(height={height}, convexity=2)
+                    polygon([{points_str}]);"""
 
+        # Calculate heights for base and roof sections
         if roof_style == 'pitched':
-            return self._generate_pitched_roof(points_str, height, roof_params)
-        elif roof_style == 'tiered':
-            return self._generate_tiered_roof(points_str, height, roof_params)
-        elif roof_style == 'flat':
-            return self._generate_flat_roof(points_str, height, roof_params)
-        elif roof_style == 'sawtooth':
-            return self._generate_sawtooth_roof(points_str, height, roof_params)
-        elif roof_style == 'modern':
-            return self._generate_modern_roof(points_str, height, roof_params)
-        elif roof_style == 'complex':
-            return self._generate_complex_roof(points_str, height, roof_params)
-        elif roof_style == 'stepped':
-            return self._generate_stepped_roof(points_str, height, roof_params)
-        else:
-            return self._generate_basic_building(points_str, height)
+            roof_height = height * roof_params['height_factor']
+            base_height = height - roof_height
+            return f"""
+                union() {{
+                    // Base of building
+                    linear_extrude(height={base_height}, convexity=2)
+                        polygon([{points_str}]);
+                    
+                    // Pitched roof - contained within the building's footprint
+                    translate([0, 0, {base_height}])
+                    intersection() {{
+                        linear_extrude(height={roof_height}, scale=0.6, convexity=2)
+                            polygon([{points_str}]);
+                        linear_extrude(height={roof_height}, convexity=2)
+                            polygon([{points_str}]);
+                    }}
+                }}"""
 
+        elif roof_style == 'tiered':
+            num_levels = roof_params['levels']
+            level_height = height / (num_levels + 1)  # +1 for base
+            
+            tiers = []
+            for i in range(num_levels):
+                start_height = level_height * (i + 1)
+                inset = (i + 1) * 1.0  # Progressive inset
+                tiers.append(f"""
+                    translate([0, 0, {start_height}])
+                    intersection() {{
+                        linear_extrude(height={level_height}, convexity=2)
+                            offset(r=-{inset})
+                                polygon([{points_str}]);
+                        linear_extrude(height={level_height}, convexity=2)
+                            polygon([{points_str}]);
+                    }}""")
+            
+            return f"""
+                union() {{
+                    // Base building
+                    linear_extrude(height={level_height}, convexity=2)
+                        polygon([{points_str}]);
+                    {' '.join(tiers)}
+                }}"""
+
+        # Add other roof styles following same pattern:
+        # 1. Always use intersection() to contain within building footprint
+        # 2. Keep all transformations relative to the building's base
+        # 3. Ensure total height matches specified height
+    def _generate_specific_roof(self, points_str, height, roof_style, roof_params):
+        """Generate a building with a specific roof style."""
+        generators = {
+            'pitched': self._generate_pitched_roof,
+            'tiered': self._generate_tiered_roof,
+            'flat': self._generate_flat_roof,
+            'sawtooth': self._generate_sawtooth_roof,
+            'modern': self._generate_modern_roof,
+            'stepped': self._generate_stepped_roof
+        }
+        
+        if roof_style in generators:
+            return generators[roof_style](points_str, height, roof_params)
+        return self._generate_basic_building(points_str, height)
     def _generate_basic_building(self, points_str, height):
         """Generate a basic building without roof details."""
         return f"""
@@ -2774,7 +2996,11 @@ class BuildingGenerator:
                 polygon([{points_str}]);"""
 
     def _generate_pitched_roof(self, points_str, height, params):
-        """Generate a pitched roof building."""
+        """
+        Generate a pitched roof building.
+        
+        The roof is created by scaling the building's top section inward and upward.
+        """
         roof_height = height * params['height_factor']
         base_height = height - roof_height
         
@@ -2791,14 +3017,18 @@ class BuildingGenerator:
             }}"""
 
     def _generate_tiered_roof(self, points_str, height, params):
-        """Generate a tiered roof with multiple levels."""
+        """
+        Generate a tiered roof with multiple levels.
+        
+        Creates a series of progressively smaller and higher sections.
+        """
         num_levels = params['levels']
-        level_height = height * 0.15  # Each tier is 15% of total height
+        level_height = height * 0.15
         base_height = height - (level_height * num_levels)
         
         tiers = []
         for i in range(num_levels):
-            offset = (i + 1) * 1.5  # Increasing inset for each tier
+            offset = (i + 1) * 1.5
             tier_start = base_height + (i * level_height)
             tiers.append(f"""
                 // Tier {i + 1}
@@ -2816,7 +3046,11 @@ class BuildingGenerator:
             }}"""
 
     def _generate_flat_roof(self, points_str, height, params):
-        """Generate a flat roof with border detail."""
+        """
+        Generate a flat roof with border detail.
+        
+        Creates a raised border around the roof's edge.
+        """
         border = params['border']
         return f"""
             union() {{
@@ -2835,7 +3069,11 @@ class BuildingGenerator:
             }}"""
 
     def _generate_sawtooth_roof(self, points_str, height, params):
-        """Generate an industrial sawtooth roof."""
+        """
+        Generate an industrial sawtooth roof.
+        
+        Creates an angled pattern typical of industrial buildings.
+        """
         angle = params['angle']
         tooth_height = height * 0.2
         base_height = height - tooth_height
@@ -2846,23 +3084,24 @@ class BuildingGenerator:
                 linear_extrude(height={base_height}, convexity=2)
                     polygon([{points_str}]);
                 
-                // Sawtooth roof
-                translate([0, 0, {base_height}]) {{
+                // Sawtooth roof within building boundary
+                translate([0, 0, {base_height}])
                     intersection() {{
                         linear_extrude(height={tooth_height}, convexity=2)
                             polygon([{points_str}]);
-                        
-                        // Sawtooth pattern
                         rotate([{angle}, 0, 0])
                             translate([0, 0, -50])
                                 linear_extrude(height=100, convexity=4)
                                     polygon([{points_str}]);
                     }}
-                }}
             }}"""
 
     def _generate_modern_roof(self, points_str, height, params):
-        """Generate a modern style roof with setback."""
+        """
+        Generate a modern style roof with setback.
+        
+        Creates a smaller top section set back from the building's edge.
+        """
         setback = params['setback']
         top_height = height * 0.2
         base_height = height - top_height
@@ -2880,42 +3119,19 @@ class BuildingGenerator:
                             polygon([{points_str}]);
             }}"""
 
-    def _generate_complex_roof(self, points_str, height, params):
-        """Generate a complex roof with multiple variations."""
-        variations = params['variations']
-        section_height = height * 0.15
-        base_height = height - (section_height * variations)
-        
-        sections = []
-        for i in range(variations):
-            offset = 1.0 + (i * 0.8)  # Progressive offset
-            section_start = base_height + (i * section_height)
-            scale = 1.0 - (i * 0.15)  # Progressive scale reduction
-            
-            sections.append(f"""
-                // Complex section {i + 1}
-                translate([0, 0, {section_start}])
-                    linear_extrude(height={section_height}, scale={scale}, convexity=2)
-                        offset(r=-{offset})
-                            polygon([{points_str}]);""")
-        
-        return f"""
-            union() {{
-                // Base building
-                linear_extrude(height={base_height}, convexity=2)
-                    polygon([{points_str}]);
-                {' '.join(sections)}
-            }}"""
-
     def _generate_stepped_roof(self, points_str, height, params):
-        """Generate a stepped industrial roof."""
+        """
+        Generate a stepped roof with multiple levels.
+        
+        Creates a series of progressively smaller sections stepping upward.
+        """
         num_levels = params['levels']
         step_height = height * 0.12
         base_height = height - (step_height * num_levels)
         
         steps = []
         for i in range(num_levels):
-            offset = 2.0 + (i * 1.5)  # Increasing step size
+            offset = 2.0 + (i * 1.5)
             step_start = base_height + (i * step_height)
             steps.append(f"""
                 // Step {i + 1}
@@ -2930,6 +3146,37 @@ class BuildingGenerator:
                 linear_extrude(height={base_height}, convexity=2)
                     polygon([{points_str}]);
                 {' '.join(steps)}
+            }}"""
+
+    def _generate_complex_roof(self, points_str, height, params):
+        """
+        Generate a complex roof with multiple architectural features.
+        
+        Creates an intricate roof design with multiple elements and variations.
+        """
+        variations = params.get('variations', 3)
+        section_height = height * 0.15
+        base_height = height - (section_height * variations)
+        
+        sections = []
+        for i in range(variations):
+            offset = 1.0 + (i * 0.8)
+            section_start = base_height + (i * section_height)
+            scale = 1.0 - (i * 0.15)
+            
+            sections.append(f"""
+                // Complex section {i + 1}
+                translate([0, 0, {section_start}])
+                    linear_extrude(height={section_height}, scale={scale}, convexity=2)
+                        offset(r=-{offset})
+                            polygon([{points_str}]);""")
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                {' '.join(sections)}
             }}"""
 ```
 
@@ -3048,31 +3295,6 @@ class StyleManager:
         self.current_features = features
 
 ```
-
-# package.json
-
-```json
-{
-  "name": "shadow-city-frontend",
-  "version": "1.0.0",
-  "description": "Node frontend to interact with the Shadow City Generator command line tool",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "multer": "1.4.5-lts.1",
-    "ejs": "^3.1.8",
-    "uuid": "^9.0.0"
-  }
-}
-
-```
-
-# psl
-
-This is a binary file of the type: Binary
 
 # public/css/style.css
 
@@ -3345,820 +3567,5 @@ watchdog>=2.1.0  # For file watching
 # Platform-specific requirements (comment out what you don't need):
 pywin32>=228; sys_platform == 'win32'  # For Windows auto-reload
 # Note: Linux requires xdotool (install via package manager)
-```
-
-# server.js
-
-```js
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const { spawn } = require("child_process");
-const fs = require("fs");
-const { v4: uuidv4 } = require("uuid");
-
-const app = express();
-const port = process.env.PORT || 3000;
-
-// Set view engine to EJS
-app.set("view engine", "ejs");
-app.set("views", path.join(__dirname, "views"));
-
-// Serve static files
-app.use(express.static(path.join(__dirname, "public")));
-app.use("/uploads", express.static("uploads"));
-app.use("/outputs", express.static("outputs"));
-
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
-// Ensure uploads/outputs folders exist
-const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
-const outputsDir = path.join(__dirname, "outputs");
-if (!fs.existsSync(outputsDir)) {
-  fs.mkdirSync(outputsDir);
-}
-
-// Configure Multer storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/");
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + uuidv4();
-    cb(null, uniqueSuffix + "-" + file.originalname);
-  },
-});
-
-// Only allow .geojson files
-function fileFilter(req, file, cb) {
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (ext === ".geojson") {
-    cb(null, true);
-  } else {
-    cb(new Error("Invalid file type. Only .geojson files are allowed."));
-  }
-}
-
-// Create Multer instance with storage + fileFilter
-const upload = multer({ storage: storage, fileFilter: fileFilter });
-
-// -------------------------------------
-// ROUTES
-// -------------------------------------
-
-// Home route
-app.get("/", (req, res) => {
-  res.render("index");
-});
-
-// Endpoint to handle AJAX file upload
-app.post("/uploadFile", upload.single("geojson"), (req, res) => {
-  // If Multer’s fileFilter rejects the file, req.file will be undefined
-  if (!req.file) {
-    return res
-      .status(400)
-      .json({ error: "No valid .geojson file was uploaded." });
-  }
-  const filePath = path.join(__dirname, req.file.path);
-  res.json({ filePath: filePath });
-});
-
-// Live preview endpoint
-app.post("/preview", (req, res) => {
-  const uploadedFile = req.body.uploadedFile;
-  if (!uploadedFile) {
-    return res.status(400).json({ error: "No uploaded file provided." });
-  }
-  const outputBase = "preview-" + Date.now() + "-" + uuidv4();
-  const outputScad = path.join(outputsDir, outputBase + ".scad");
-
-  let args = [
-    path.join(__dirname, "geojson_to_shadow_city.py"),
-    uploadedFile,
-    outputScad,
-    "--export",
-    "preview",
-  ];
-
-  // Basic options
-  if (req.body.size) args.push("--size", req.body.size);
-  if (req.body.height) args.push("--height", req.body.height);
-  if (req.body.style) args.push("--style", req.body.style);
-  if (req.body.detail) args.push("--detail", req.body.detail);
-  if (req.body["merge-distance"])
-    args.push("--merge-distance", req.body["merge-distance"]);
-  if (req.body["cluster-size"])
-    args.push("--cluster-size", req.body["cluster-size"]);
-  if (req.body["height-variance"])
-    args.push("--height-variance", req.body["height-variance"]);
-  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
-  if (req.body["water-depth"])
-    args.push("--water-depth", req.body["water-depth"]);
-  if (req.body["min-building-area"])
-    args.push("--min-building-area", req.body["min-building-area"]);
-  if (req.body.debug === "on") args.push("--debug");
-
-  // NEW bridging lines
-  if (req.body["bridge-height"]) {
-    args.push("--bridge-height", req.body["bridge-height"]);
-  }
-  if (req.body["bridge-thickness"]) {
-    args.push("--bridge-thickness", req.body["bridge-thickness"]);
-  }
-  if (req.body["support-width"]) {
-    args.push("--support-width", req.body["support-width"]);
-  }
-
-  // Preprocessing
-  if (req.body.preprocess === "on") args.push("--preprocess");
-  if (req.body["crop-distance"])
-    args.push("--crop-distance", req.body["crop-distance"]);
-  if (req.body["crop-bbox"]) {
-    const bbox = req.body["crop-bbox"]
-      .split(",")
-      .map((coord) => coord.trim())
-      .map(Number);
-    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      args.push(
-        "--crop-bbox",
-        bbox[0].toString(),
-        bbox[1].toString(),
-        bbox[2].toString(),
-        bbox[3].toString()
-      );
-    }
-  }
-
-  // Preview integration
-  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
-    args.push(
-      "--preview-size",
-      req.body["preview-size-width"],
-      req.body["preview-size-height"]
-    );
-  }
-  if (req.body["preview-file"]) {
-    args.push("--preview-file", req.body["preview-file"]);
-  }
-  if (req.body.watch === "on") {
-    args.push("--watch");
-  }
-  if (req.body["openscad-path"]) {
-    args.push("--openscad-path", req.body["openscad-path"]);
-  }
-
-  console.log("Live preview generation command:", args.join(" "));
-
-  const pythonProcess = spawn("python3", args);
-  let stdoutData = "";
-  let stderrData = "";
-
-  pythonProcess.stdout.on("data", (data) => {
-    stdoutData += data.toString();
-  });
-  pythonProcess.stderr.on("data", (data) => {
-    stderrData += data.toString();
-  });
-  pythonProcess.on("close", (code) => {
-    if (code !== 0) {
-      console.error("Python preview process exited with code", code);
-      console.error(stderrData);
-      return res.status(500).json({ error: stderrData });
-    }
-    const previewMain = outputBase + "_preview_main.png";
-    const previewFrame = outputBase + "_preview_frame.png";
-
-    res.json({
-      previewMain: "/outputs/" + previewMain,
-      previewFrame: "/outputs/" + previewFrame,
-      stdout: stdoutData,
-      stderr: stderrData,
-    });
-  });
-});
-
-// Final render endpoint
-app.post("/render", (req, res) => {
-  const uploadedFile = req.body.uploadedFile;
-  if (!uploadedFile) {
-    return res.status(400).json({ error: "No uploaded file provided." });
-  }
-  const outputBase = "output-" + Date.now() + "-" + uuidv4();
-  const outputPath = path.join(outputsDir, outputBase + ".scad");
-
-  let args = [
-    path.join(__dirname, "geojson_to_shadow_city.py"),
-    uploadedFile,
-    outputPath,
-  ];
-
-  // Basic options
-  if (req.body.size) args.push("--size", req.body.size);
-  if (req.body.height) args.push("--height", req.body.height);
-  if (req.body.style) args.push("--style", req.body.style);
-  if (req.body.detail) args.push("--detail", req.body.detail);
-  if (req.body["merge-distance"])
-    args.push("--merge-distance", req.body["merge-distance"]);
-  if (req.body["cluster-size"])
-    args.push("--cluster-size", req.body["cluster-size"]);
-  if (req.body["height-variance"])
-    args.push("--height-variance", req.body["height-variance"]);
-  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
-  if (req.body["water-depth"])
-    args.push("--water-depth", req.body["water-depth"]);
-  if (req.body["min-building-area"])
-    args.push("--min-building-area", req.body["min-building-area"]);
-  if (req.body.debug === "on") args.push("--debug");
-
-  // NEW bridging lines
-  if (req.body["bridge-height"]) {
-    args.push("--bridge-height", req.body["bridge-height"]);
-  }
-  if (req.body["bridge-thickness"]) {
-    args.push("--bridge-thickness", req.body["bridge-thickness"]);
-  }
-  if (req.body["support-width"]) {
-    args.push("--support-width", req.body["support-width"]);
-  }
-
-  // Preprocessing
-  if (req.body.preprocess === "on") args.push("--preprocess");
-  if (req.body["crop-distance"])
-    args.push("--crop-distance", req.body["crop-distance"]);
-  if (req.body["crop-bbox"]) {
-    const bbox = req.body["crop-bbox"]
-      .split(",")
-      .map((coord) => coord.trim())
-      .map(Number);
-    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      args.push(
-        "--crop-bbox",
-        bbox[0].toString(),
-        bbox[1].toString(),
-        bbox[2].toString(),
-        bbox[3].toString()
-      );
-    }
-  }
-
-  // Export options
-  if (req.body.export) args.push("--export", req.body.export);
-  if (req.body["output-stl"]) args.push("--output-stl", req.body["output-stl"]);
-  if (req.body["no-repair"] === "on") args.push("--no-repair");
-  if (req.body.force === "on") args.push("--force");
-
-  // Preview & integration
-  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
-    args.push(
-      "--preview-size",
-      req.body["preview-size-width"],
-      req.body["preview-size-height"]
-    );
-  }
-  if (req.body["preview-file"]) {
-    args.push("--preview-file", req.body["preview-file"]);
-  }
-  if (req.body.watch === "on") {
-    args.push("--watch");
-  }
-  if (req.body["openscad-path"]) {
-    args.push("--openscad-path", req.body["openscad-path"]);
-  }
-
-  console.log("Final render command:", args.join(" "));
-
-  const pythonProcess = spawn("python3", args);
-  let stdoutData = "";
-  let stderrData = "";
-
-  pythonProcess.stdout.on("data", (data) => {
-    stdoutData += data.toString();
-  });
-  pythonProcess.stderr.on("data", (data) => {
-    stderrData += data.toString();
-  });
-  pythonProcess.on("close", (code) => {
-    if (code !== 0) {
-      console.error("Python final render process exited with code", code);
-      console.error(stderrData);
-      return res.status(500).json({ error: stderrData });
-    }
-    const mainScad = outputBase + "_main.scad";
-    const frameScad = outputBase + "_frame.scad";
-    const logFile = outputBase + ".scad.log";
-
-    let stlFiles = {};
-    if (req.body.export === "stl" || req.body.export === "both") {
-      const mainStl = outputBase + "_main.stl";
-      const frameStl = outputBase + "_frame.stl";
-      stlFiles = {
-        mainStl: "/outputs/" + mainStl,
-        frameStl: "/outputs/" + frameStl,
-      };
-    }
-
-    res.json({
-      mainScad: "/outputs/" + mainScad,
-      frameScad: "/outputs/" + frameScad,
-      logFile: "/outputs/" + logFile,
-      stlFiles: stlFiles,
-      stdout: stdoutData,
-      stderr: stderrData,
-    });
-  });
-});
-
-// Fallback /upload endpoint (if needed)
-app.post("/upload", upload.single("geojson"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).send("No valid .geojson file was uploaded.");
-  }
-  res.redirect("/");
-});
-
-// Start the server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
-
-```
-
-# views/index.ejs
-
-```ejs
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-  <meta charset="UTF-8">
-  <title>Shadow City Generator Frontend</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <link rel="stylesheet" href="/css/style.css">
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <style>
-    .preview-container {
-      margin-top: 20px;
-    }
-
-    .preview-container img {
-      max-width: 100%;
-      border: 1px solid #ddd;
-      padding: 5px;
-    }
-
-    .download-links a {
-      display: block;
-      margin-bottom: 5px;
-    }
-
-    .log-container {
-      margin-top: 20px;
-    }
-
-    #liveLog {
-      background-color: #1e1e1e;
-      color: #cfcfcf;
-      padding: 10px;
-      border-radius: 5px;
-      min-height: 100px;
-      max-height: 600px;
-      overflow-y: scroll;
-      font-family: monospace;
-      white-space: pre;
-    }
-
-    .processing-indicator {
-      display: none;
-      color: #007bff;
-      margin-bottom: 10px;
-    }
-  </style>
-</head>
-
-<body>
-  <div class="container">
-    <h1 class="mt-5">Shadow City Generator</h1>
-    <p class="lead">Use the form to upload a GeoJSON file and set options. Live previews and downloadable outputs will
-      appear on the right.</p>
-
-    <!-- Hidden field to store uploaded file path -->
-    <input type="hidden" id="uploadedFile" name="uploadedFile" value="">
-
-    <div class="row">
-      <!-- Left Column: Form and Options -->
-      <div class="col-md-4">
-        <form id="optionsForm">
-          <!-- File Upload -->
-          <div class="form-group">
-            <label for="geojson">GeoJSON File</label>
-            <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
-          </div>
-
-          <!-- Preprocessing Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Preprocessing Options</legend>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
-              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
-            </div>
-            <div class="form-group">
-              <label for="crop-distance">Crop Distance (meters)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
-            </div>
-            <div class="form-group">
-              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
-              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
-                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
-            </div>
-          </fieldset>
-
-          <!-- Basic Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Basic Options</legend>
-            <div class="form-group">
-              <label for="size">Model Size (mm)</label>
-              <input type="number" class="form-control live-preview" id="size" name="size" value="200" required>
-            </div>
-            <div class="form-group">
-              <label for="height">Maximum Height (mm)</label>
-              <input type="number" class="form-control live-preview" id="height" name="height" value="20" required>
-            </div>
-            <div class="form-group">
-              <label for="style">Artistic Style</label>
-              <select class="form-control live-preview" id="style" name="style">
-                <option value="modern">Modern</option>
-                <option value="classic">Classic</option>
-                <option value="minimal">Minimal</option>
-                <option value="block-combine" selected>Block Combine</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="detail">Detail Level (0-2)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="detail" name="detail" value="1.0"
-                required>
-            </div>
-            <div class="form-group">
-              <label for="merge-distance">Merge Distance</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="merge-distance"
-                name="merge-distance" value="2.0">
-            </div>
-            <div class="form-group">
-              <label for="cluster-size">Cluster Size</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="cluster-size" name="cluster-size"
-                value="3.0">
-            </div>
-            <div class="form-group">
-              <label for="height-variance">Height Variance</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="height-variance"
-                name="height-variance" value="0.2">
-            </div>
-            <div class="form-group">
-              <label for="road-width">Road Width (mm)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="road-width" name="road-width"
-                value="2.0">
-            </div>
-            <div class="form-group">
-              <label for="water-depth">Water Depth (mm)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="water-depth" name="water-depth"
-                value="1.4">
-            </div>
-            <div class="form-group">
-              <label for="min-building-area">Minimum Building Area (m²)</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="min-building-area"
-                name="min-building-area" value="600.0">
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="debug" name="debug">
-              <label class="form-check-label" for="debug">Enable Debug Output</label>
-            </div>
-          </fieldset>
-
-          <!-- Bridge Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Bridge Options</legend>
-            <div class="form-group">
-              <label for="bridge-height">Bridge Deck Height Above Base</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="bridge-height" name="bridge-height"
-                value="2.0">
-            </div>
-            <div class="form-group">
-              <label for="bridge-thickness">Bridge Deck Thickness</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="bridge-thickness"
-                name="bridge-thickness" value="1.0">
-            </div>
-            <div class="form-group">
-              <label for="support-width">Bridge Support Radius</label>
-              <input type="number" step="0.1" class="form-control live-preview" id="support-width" name="support-width"
-                value="2.0">
-            </div>
-          </fieldset>
-
-          <!-- Export Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Export Options</legend>
-            <div class="form-group">
-              <label for="export">Export Format</label>
-              <select class="form-control live-preview" id="export" name="export">
-                <option value="preview">Preview</option>
-                <option value="stl">STL</option>
-                <option value="both" selected>Both</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="output-stl">Output STL Filename</label>
-              <input type="text" class="form-control live-preview" id="output-stl" name="output-stl"
-                placeholder="Optional">
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="no-repair" name="no-repair">
-              <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="force" name="force">
-              <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
-            </div>
-          </fieldset>
-
-          <!-- Preview & Integration Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Preview &amp; Integration Options</legend>
-            <div class="form-group">
-              <label>Preview Image Size (Width, Height in pixels)</label>
-              <div class="form-row">
-                <div class="col">
-                  <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
-                    value="1080">
-                </div>
-                <div class="col">
-                  <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
-                    value="1080">
-                </div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="preview-file">Preview Image Filename</label>
-              <input type="text" class="form-control live-preview" id="preview-file" name="preview-file"
-                placeholder="Optional">
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="watch" name="watch">
-              <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
-            </div>
-            <div class="form-group">
-              <label for="openscad-path">OpenSCAD Executable Path</label>
-              <input type="text" class="form-control live-preview" id="openscad-path" name="openscad-path"
-                placeholder="Optional">
-            </div>
-          </fieldset>
-
-          <!-- Final Render Button -->
-          <button type="button" id="renderBtn" class="btn btn-success mb-3">Render Final Model</button>
-        </form>
-      </div>
-
-      <!-- Right Column: Live Previews and Downloadable Files -->
-      <div class="col-md-8">
-        <div class="processing-indicator">
-          Processing changes... Preview will update in 2 seconds.
-        </div>
-
-        <div class="preview-container">
-          <h3>Live Preview - Main Model</h3>
-          <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
-        </div>
-
-        <!--      <div class="preview-container">
-          <h3>Live Preview - Frame Model</h3>
-          <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
-        </div>
-      -->
-        <div class="log-container">
-          <h4>Live Log</h4>
-          <div id="liveLog"></div>
-        </div>
-
-        <div class="download-links mt-4">
-          <h4>Download Rendered Files</h4>
-          <div id="downloadLinks">
-            <!-- Links will be inserted here after final render -->
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // Debounce function to limit how often a function can be called
-    function debounce(func, wait) {
-      let timeout;
-      return function executedFunction(...args) {
-        // Show processing indicator
-        $(".processing-indicator").show();
-
-        const later = () => {
-          clearTimeout(timeout);
-          $(".processing-indicator").hide();
-          func(...args);
-        };
-
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-      };
-    }
-
-    // Function to update the live preview images
-    function updatePreview() {
-      var uploadedFile = $("#uploadedFile").val();
-      if (!uploadedFile) {
-        console.log("No file uploaded yet.");
-        return;
-      }
-
-      $("#liveLog").text("Generating preview...");
-
-      var formData = $("#optionsForm").serializeArray();
-      formData.push({ name: "uploadedFile", value: uploadedFile });
-
-      $.ajax({
-        url: "/preview",
-        type: "POST",
-        data: formData,
-        success: function (data) {
-          if (data.previewMain && data.previewFrame) {
-            $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
-            $("#previewFrame").attr("src", data.previewFrame + "?t=" + new Date().getTime()).show();
-          }
-
-          var logText = "";
-          if (data.stdout) {
-            logText += data.stdout + "\n";
-          }
-          if (data.stderr) {
-            logText += data.stderr + "\n";
-          }
-          if (logText.trim().length > 0) {
-            $("#liveLog").text(logText);
-          }
-        },
-        error: function (err) {
-          console.error("Preview update error:", err);
-          $("#liveLog").text("Error generating preview:\n" + JSON.stringify(err));
-        }
-      });
-    }
-
-    // Create debounced version of updatePreview with 2 second delay
-    const debouncedUpdatePreview = debounce(updatePreview, 2000);
-
-    // Handle file upload
-    $("#geojson").on("change", function () {
-      var fileInput = document.getElementById("geojson");
-      if (fileInput.files.length === 0) return;
-
-      var formData = new FormData();
-      formData.append("geojson", fileInput.files[0]);
-
-      $.ajax({
-        url: "/uploadFile",
-        type: "POST",
-        data: formData,
-        processData: false,
-        contentType: false,
-        success: function (data) {
-          if (data.filePath) {
-            $("#uploadedFile").val(data.filePath);
-            debouncedUpdatePreview();
-          }
-        },
-        error: function (err) {
-          console.error("File upload error:", err);
-          $("#liveLog").text("Error uploading file:\n" + JSON.stringify(err));
-        }
-      });
-    });
-
-    // Update live preview when any option changes
-    $(".live-preview").on("change keyup", function () {
-      debouncedUpdatePreview();
-    });
-
-    // Handle final render button click
-    $("#renderBtn").on("click", function () {
-      var uploadedFile = $("#uploadedFile").val();
-      if (!uploadedFile) {
-        alert("Please upload a GeoJSON file first.");
-        return;
-      }
-
-      $("#liveLog").text("Generating final render...");
-      var formData = $("#optionsForm").serializeArray();
-      formData.push({ name: "uploadedFile", value: uploadedFile });
-
-      $.ajax({
-        url: "/render",
-        type: "POST",
-        data: formData,
-        success: function (data) {
-          var linksHtml = "";
-
-          if (data.mainScad) {
-            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a><br>';
-          }
-          if (data.frameScad) {
-            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
-          }
-
-          if (data.stlFiles && data.stlFiles.mainStl) {
-            linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
-          }
-          if (data.stlFiles && data.stlFiles.frameStl) {
-            linksHtml += '<a href="' + data.stlFiles.frameStl + '" download>Frame Model (STL)</a><br>';
-          }
-
-          if (data.logFile) {
-            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a><br>';
-          }
-
-          $("#downloadLinks").html(linksHtml);
-
-          var logText = "";
-          if (data.stdout) {
-            logText += data.stdout + "\n";
-          }
-          if (data.stderr) {
-            logText += data.stderr + "\n";
-          }
-          if (logText.trim().length > 0) {
-            $("#liveLog").text(logText);
-          }
-        },
-        error: function (err) {
-          console.error("Final render error:", err);
-          $("#liveLog").text("Error during final render:\n" + JSON.stringify(err));
-          alert("An error occurred during final render.");
-        }
-      });
-    });
-  </script>
-</body>
-
-</html>
-```
-
-# views/result.ejs
-
-```ejs
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-  <meta charset="UTF-8">
-  <title>Generation Result</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <link rel="stylesheet" href="/css/style.css">
-</head>
-
-<body>
-  <div class="container">
-    <h1 class="mt-5">Generation Result</h1>
-    <p class="lead">The Shadow City model has been generated. Download the output files below:</p>
-    <ul class="list-group">
-      <li class="list-group-item">
-        <a href="<%= mainScad %>" download>Main Model (SCAD)</a>
-      </li>
-      <li class="list-group-item">
-        <a href="<%= frameScad %>" download>Frame Model (SCAD)</a>
-      </li>
-      <% if (stlFiles && stlFiles.mainStl) { %>
-        <li class="list-group-item">
-          <a href="<%= stlFiles.mainStl %>" download>Main Model (STL)</a>
-        </li>
-        <li class="list-group-item">
-          <a href="<%= stlFiles.frameStl %>" download>Frame Model (STL)</a>
-        </li>
-        <% } %>
-          <li class="list-group-item">
-            <a href="<%= logFile %>" download>Debug Log</a>
-          </li>
-    </ul>
-    <hr>
-    <h3>Process Output</h3>
-    <div class="card">
-      <div class="card-body">
-        <h5>Standard Output</h5>
-        <pre><%= stdout %></pre>
-        <h5>Error Output</h5>
-        <pre><%= stderr %></pre>
-      </div>
-    </div>
-    <a href="/" class="btn btn-secondary mt-3">Back to Home</a>
-  </div>
-</body>
-
-</html>
 ```
 
