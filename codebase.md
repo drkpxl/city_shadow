@@ -1537,7 +1537,6 @@ class PreviewGenerator:
 # lib/scad_generator.py
 
 ```py
-# lib/scad_generator.py
 from .geometry import GeometryUtils
 from .style.style_manager import StyleManager
 
@@ -1550,7 +1549,7 @@ class ScadGenerator:
     def generate_openscad(self, features, size, layer_specs):
         """
         Generate complete OpenSCAD code for main model (excluding frame).
-        We 'union' buildings & bridges, then 'difference' roads/water/rail.
+        We 'union' buildings, bridges, and parks, then 'difference' roads/water/rail.
         """
         scad = [
             f"""// Generated with Enhanced City Converter
@@ -1567,6 +1566,9 @@ difference() {{
 
         // Bridges
         {self._generate_bridge_features(features['bridges'], layer_specs)}
+
+        // Parks
+        {self._generate_park_features(features['parks'], layer_specs)}
     }}
 
     // Subtractive features
@@ -1753,7 +1755,7 @@ difference() {{
                     )
 
             if points_str:
-                color_val = "green" if is_parking else "black"
+                color_val = "yellow" if is_parking else "black"
                 scad.append(
                     f"""
         // {"Parking Area" if is_parking else "Road"} {i+1}
@@ -1835,6 +1837,25 @@ difference() {{
 
         return "\n".join(scad)
 
+    def _generate_park_features(self, park_features, layer_specs):
+        """Generate OpenSCAD code for park features."""
+        scad = []
+        base_height = layer_specs["base"]["height"]
+        park_offset = layer_specs["parks"].get("start_offset", 0.2)
+        park_thickness = layer_specs["parks"].get("thickness", 0.4)
+        for i, park in enumerate(park_features):
+            points_str = self.geometry.generate_polygon_points(park["coords"])
+            if not points_str:
+                continue
+            scad.append(f"""
+        // Park {i+1}
+        translate([0, 0, {base_height + park_offset}]) {{
+            color("green")
+            linear_extrude(height={park_thickness}, convexity=2)
+                polygon([{points_str}]);
+        }}""")
+        return "\n".join(scad)
+
 ```
 
 # lib/style_manager.py
@@ -1884,6 +1905,10 @@ class StyleManager:
             "buildings": {"min_height": 2, "max_height": 5},
             "base": {
                 "height": 5,
+            },
+            "parks": {
+                "start_offset": 0,  # Height offset above the base for parks
+                "thickness": 0.5      # Extrusion thickness for parks
             },
         }
 

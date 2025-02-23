@@ -194,21 +194,23 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for roads (subtractive)"""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
         road_width = layer_specs["roads"]["width"]
+        # Get park parameters so roads extend through parks.
+        park_offset = layer_specs["parks"].get("start_offset", 0.2)
+        park_thickness = layer_specs["parks"].get("thickness", 0.4)
+        # Compute extrusion height to cover from the road base up past the parks.
+        road_extrude_height = road_depth + park_offset + park_thickness + 0.1
 
         for i, road in enumerate(road_features):
             coords = road.get("coords", [])
             is_parking = road.get("is_parking", False)
 
             if is_parking and len(coords) >= 3:
-                # Parking lot as polygon
                 points_str = self.geometry.generate_polygon_points(coords)
             else:
-                # Road as buffered line
                 points_str = None
                 if len(coords) >= 2:
                     points_str = self.geometry.generate_buffered_polygon(
@@ -219,13 +221,13 @@ difference() {{
                 color_val = "yellow" if is_parking else "black"
                 scad.append(
                     f"""
-        // {"Parking Area" if is_parking else "Road"} {i+1}
-        translate([0, 0, {base_height - road_depth}])
-            color("{color_val}")
-            {{
-                linear_extrude(height={road_depth + 0.1}, convexity=2)
-                    polygon([{points_str}]);
-            }}"""
+            // {"Parking Area" if is_parking else "Road"} {i+1}
+            translate([0, 0, {base_height - road_depth}])
+                color("{color_val}")
+                {{
+                    linear_extrude(height={road_extrude_height}, convexity=2)
+                        polygon([{points_str}]);
+                }}"""
                 )
 
         return "\n".join(scad)
