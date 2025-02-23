@@ -182,10 +182,11 @@ def main():
                 args.output_scad, preview_file, size=args.preview_size
             )
 
-        # Always generate STL files
-        print("\nGenerating STL files...")
-        stl_file = args.output_scad.replace(".scad", ".stl")
-        integration.generate_stl(args.output_scad, stl_file)
+        # Only generate STL files for final render (when preview_size isn't set)
+        if not args.preview_size:
+            print("\nGenerating STL files...")
+            stl_file = args.output_scad.replace(".scad", ".stl")
+            integration.generate_stl(args.output_scad, stl_file)
 
         if args.watch:
             print("\nStarting OpenSCAD integration...")

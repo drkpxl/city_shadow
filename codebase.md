@@ -86,7 +86,7 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
-    # NEW arguments for bridge parameters:
+    # Bridge parameters
     parser.add_argument(
         "--bridge-height",
         type=float,
@@ -124,27 +124,6 @@ def main():
         help="Bounding box coordinates for cropping",
     )
 
-    # Export format group
-    export_group = parser.add_argument_group("Export Options")
-    export_group.add_argument(
-        "--export",
-        choices=["preview", "stl", "both"],
-        help="Export format (preview image, STL, or both)",
-    )
-    export_group.add_argument(
-        "--output-stl", help="Output STL filename (default: based on SCAD filename)"
-    )
-    export_group.add_argument(
-        "--no-repair",
-        action="store_true",
-        help="Disable automatic geometry repair attempts",
-    )
-    export_group.add_argument(
-        "--force",
-        action="store_true",
-        help="Force STL generation even if validation fails",
-    )
-
     # Preview options
     preview_group = parser.add_argument_group("Preview and Integration")
     preview_group.add_argument(
@@ -177,8 +156,6 @@ def main():
             "cluster_size": args.cluster_size,
             "height_variance": args.height_variance,
             "min_building_area": args.min_building_area,
-
-            # NEW lines for bridging:
             "bridge_height": args.bridge_height,
             "bridge_thickness": args.bridge_thickness,
             "support_width": args.support_width,
@@ -214,48 +191,33 @@ def main():
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
 
-        # Handle exports if requested
-        if args.export or args.watch:
-            integration = OpenSCADIntegration(args.openscad_path)
+        # Set up OpenSCAD integration
+        integration = OpenSCADIntegration(args.openscad_path)
 
-            # Determine output filenames
-            stl_file = args.output_stl or args.output_scad.replace(".scad", ".stl")
-            preview_file = args.preview_file or args.output_scad.replace(
-                ".scad", "_preview.png"
+        # Generate preview images
+        preview_file = args.preview_file or args.output_scad.replace(".scad", "_preview.png")
+        if args.preview_size:
+            print("\nGenerating preview image...")
+            integration.generate_preview(
+                args.output_scad, preview_file, size=args.preview_size
             )
 
-            if args.export in ["preview", "both"]:
-                print("\nGenerating preview image...")
-                integration.generate_preview(
-                    args.output_scad, preview_file, size=args.preview_size
-                )
+        # Only generate STL files for final render (when preview_size isn't set)
+        if not args.preview_size:
+            print("\nGenerating STL files...")
+            stl_file = args.output_scad.replace(".scad", ".stl")
+            integration.generate_stl(args.output_scad, stl_file)
 
-            if args.export in ["stl", "both"]:
-                print("\nGenerating STL file...")
-                try:
-                    integration.generate_stl(
-                        args.output_scad, stl_file, repair=not args.no_repair
-                    )
-                except Exception as e:
-                    if args.force:
-                        print(f"Warning: {str(e)}")
-                        print("Forcing STL generation due to --force flag...")
-                        integration.generate_stl(
-                            args.output_scad, stl_file, repair=False
-                        )
-                    else:
-                        raise
-
-            if args.watch:
-                print("\nStarting OpenSCAD integration...")
-                print("Press Ctrl+C to stop watching")
-                integration.watch_and_reload(args.output_scad)
-                try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    integration.stop_watching()
-                    print("\nStopped watching SCAD file")
+        if args.watch:
+            print("\nStarting OpenSCAD integration...")
+            print("Press Ctrl+C to stop watching")
+            integration.watch_and_reload(args.output_scad)
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                integration.stop_watching()
+                print("\nStopped watching SCAD file")
 
     except Exception as e:
         print(f"Error: {str(e)}")
@@ -264,7 +226,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 ```
 
 # lib/__init__.py
@@ -1317,7 +1278,7 @@ class ExportManager:
             "fs": 0.2,
         }
 
-    def generate_stl(self, scad_file, output_stl, repair=True):
+    def generate_stl(self, scad_file, output_stl):
         """Generate STL files for both main model and frame."""
         try:
             main_scad_file = scad_file.replace(".scad", "_main.scad")
@@ -1362,7 +1323,6 @@ class ExportManager:
         command.append(input_file)
 
         subprocess.run(command, env=env, capture_output=True, text=True, check=True)
-
 ```
 
 # lib/preview/file_watcher.py
@@ -1533,9 +1493,9 @@ class OpenSCADIntegration:
         """Generate preview using PreviewGenerator."""
         return self.preview_generator.generate(output_file, output_image, size)
 
-    def generate_stl(self, scad_file, output_stl, repair=True):
-        """Generate STL using ExportManager."""
-        return self.export_manager.generate_stl(scad_file, output_stl, repair)
+    def generate_stl(self, scad_file, output_stl):
+        """Generate STL files using ExportManager."""
+        return self.export_manager.generate_stl(scad_file, output_stl)
 
     def watch_and_reload(self, scad_file):
         """Watch SCAD file using FileWatcher."""
@@ -1544,7 +1504,6 @@ class OpenSCADIntegration:
     def stop_watching(self):
         """Stop file watching."""
         self.file_watcher.stop_watching()
-
 ```
 
 # lib/preview/preview_generator.py
@@ -1559,7 +1518,7 @@ class PreviewGenerator:
     def __init__(self, openscad_path):
         self.openscad_path = openscad_path
 
-    def generate(self, output_file, output_image, size=(1920, 1080)):
+    def generate(self, output_file, output_image, size=(1080, 1080)):
         """Generate preview images for both main model and frame."""
         main_scad_file = output_file.replace(".scad", "_main.scad")
         frame_scad_file = output_file.replace(".scad", "_frame.scad")
@@ -3477,13 +3436,6 @@ const processPreviewOptions = (body, args) => {
     args.push("--openscad-path", body["openscad-path"]);
 };
 
-const processExportOptions = (body, args) => {
-  if (body.export) args.push("--export", body.export);
-  if (body["output-stl"]) args.push("--output-stl", body["output-stl"]);
-  if (body["no-repair"] === "on") args.push("--no-repair");
-  if (body.force === "on") args.push("--force");
-};
-
 const buildPythonArgs = (inputFile, outputFile, body) => {
   const args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
@@ -3548,7 +3500,6 @@ app.post("/preview", async (req, res) => {
 
   try {
     const args = buildPythonArgs(uploadedFile, outputScad, req.body);
-    args.push("--export", "preview");
 
     const { stdout, stderr } = await runPythonProcess(args);
 
@@ -3574,8 +3525,6 @@ app.post("/render", async (req, res) => {
 
   try {
     const args = buildPythonArgs(uploadedFile, outputPath, req.body);
-    processExportOptions(req.body, args);
-
     const { stdout, stderr } = await runPythonProcess(args);
 
     const response = {
@@ -3584,14 +3533,11 @@ app.post("/render", async (req, res) => {
       logFile: `/outputs/${outputBase}.scad.log`,
       stdout,
       stderr,
-    };
-
-    if (req.body.export === "stl" || req.body.export === "both") {
-      response.stlFiles = {
+      stlFiles: {
         mainStl: `/outputs/${outputBase}_main.stl`,
         frameStl: `/outputs/${outputBase}_frame.stl`,
-      };
-    }
+      },
+    };
 
     res.json(response);
   } catch (error) {
@@ -3743,32 +3689,6 @@ app.listen(port, () => {
               <label for="support-width">Bridge Support Radius</label>
               <input type="number" step="0.1" class="form-control live-preview" id="support-width" name="support-width"
                 value="2.0">
-            </div>
-          </fieldset>
-
-          <!-- Export Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Export Options</legend>
-            <div class="form-group">
-              <label for="export">Export Format</label>
-              <select class="form-control live-preview" id="export" name="export">
-                <option value="preview">Preview</option>
-                <option value="stl">STL</option>
-                <option value="both" selected>Both</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="output-stl">Output STL Filename</label>
-              <input type="text" class="form-control live-preview" id="output-stl" name="output-stl"
-                placeholder="Optional">
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="no-repair" name="no-repair">
-              <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="force" name="force">
-              <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
             </div>
           </fieldset>
 

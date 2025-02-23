@@ -173,7 +173,6 @@ app.post("/preview", async (req, res) => {
 
   try {
     const args = buildPythonArgs(uploadedFile, outputScad, req.body);
-    args.push("--export", "preview");
 
     const { stdout, stderr } = await runPythonProcess(args);
 

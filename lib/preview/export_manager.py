@@ -1,3 +1,8 @@
+# lib/preview/export_manager.py
+import os
+import subprocess
+
+
 class ExportManager:
     def __init__(self, openscad_path):
         self.openscad_path = openscad_path
