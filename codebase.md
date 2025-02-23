@@ -1855,238 +1855,6 @@ difference() {{
         return "\n".join(scad)
 ```
 
-# lib/style_manager.py
-
-```py
-# lib/style_manager.py
-from math import log10, sin, cos, pi, atan2
-from shapely.geometry import LineString
-from .geometry import GeometryUtils
-from .style.block_combiner import BlockCombiner
-
-
-class StyleManager:
-    def __init__(self, style_settings=None):
-        self.geometry = GeometryUtils()
-        self.block_combiner = BlockCombiner(self)
-        self.current_features = {}
-
-        # Default style settings
-        self.style = {
-            "merge_distance": 2.0,
-            "cluster_size": 3.0,
-            "height_variance": 0.2,
-            "detail_level": 1.0,
-            "artistic_style": "modern",
-            "min_building_area": 300.0,
-        }
-
-        # Override defaults with provided settings
-        if style_settings:
-            self.style.update(style_settings)
-
-    def get_default_layer_specs(self):
-        """Get default layer specifications for roads, water, buildings, etc."""
-        return {
-            "water": {
-                "depth": 3,
-            },
-            "roads": {
-                "depth": 0.6,
-                "width": 2.0,
-            },
-            "railways": {
-                "depth": 0.2,
-                "width": 1.5,
-            },
-            "buildings": {"min_height": 2, "max_height": 5},
-            "base": {
-                "height": 5,
-            },
-            "parks": {
-                "start_offset": 0,  # Height offset above the base for parks
-                "thickness": 0.5      # Extrusion thickness for parks
-            },
-        }
-
-    def scale_building_height(self, properties):
-        """
-        Given a building's OSM properties, produce a scaled building height (in mm).
-        Uses a simple log scaling approach to map real-world height to a small range.
-        """
-        default_height = 4.0
-
-        height_m = None
-        if "height" in properties:
-            try:
-                height_m = float(properties["height"].split()[0])
-            except (ValueError, IndexError):
-                pass
-        elif "building:levels" in properties:
-            try:
-                levels = float(properties["building:levels"])
-                height_m = levels * 3  # assume 3m per level
-            except ValueError:
-                pass
-
-        if height_m is None:
-            height_m = default_height
-
-        layer_specs = self.get_default_layer_specs()
-        min_height = layer_specs["buildings"]["min_height"]
-        max_height = layer_specs["buildings"]["max_height"]
-
-        # Log scaling from 1..100 meters -> min_height..max_height in mm
-        log_min = log10(1.0)
-        log_max = log10(101.0)
-        log_height = log10(height_m + 1.0)  # +1 to avoid log(0)
-        scaled = (log_height - log_min) / (log_max - log_min)
-        final_height = min_height + scaled * (max_height - min_height)
-        return round(final_height, 2)
-
-    def merge_nearby_buildings(self, buildings, barrier_union=None):
-        """Choose merging strategy based on style."""
-        if self.style["artistic_style"] == "block-combine":
-            return self.block_combiner.combine_buildings_by_block(self.current_features)
-        else:
-            return self._merge_buildings_by_distance(buildings, barrier_union)
-
-    def _merge_buildings_by_distance(self, buildings, barrier_union=None):
-        """Original distance-based merging logic"""
-        merge_dist = self.style["merge_distance"]
-        if merge_dist <= 0:
-            return buildings
-
-        indexed_buildings = []
-        for idx, bldg in enumerate(buildings):
-            ctd = self.geometry.calculate_centroid(bldg["coords"])
-            indexed_buildings.append((idx, ctd, bldg))
-
-        visited = set()
-        clusters = []
-
-        for i, centroidA, bldgA in indexed_buildings:
-            if i in visited:
-                continue
-
-            stack = [i]
-            cluster_bldgs = []
-            visited.add(i)
-
-            while stack:
-                current_idx = stack.pop()
-                _, current_centroid, current_bldg = indexed_buildings[current_idx]
-                cluster_bldgs.append(current_bldg)
-
-                for j, centroidB, bldgB in indexed_buildings:
-                    if j in visited:
-                        continue
-                    dist = self.geometry.calculate_distance(current_centroid, centroidB)
-                    if dist < merge_dist:
-                        if not self._is_blocked_by_barrier(
-                            current_centroid, centroidB, barrier_union
-                        ):
-                            visited.add(j)
-                            stack.append(j)
-
-            merged = self._merge_building_cluster(cluster_bldgs)
-            clusters.append(merged)
-
-        return clusters
-
-    def _is_blocked_by_barrier(self, ptA, ptB, barrier_union):
-        """Return True if the line from ptA to ptB intersects the barrier_union"""
-        if barrier_union is None:
-            return False
-        line = LineString([ptA, ptB])
-        return line.intersects(barrier_union)
-
-    def _merge_building_cluster(self, cluster):
-        """Merge building polygons in 'cluster' into one shape"""
-        if len(cluster) == 1:
-            return cluster[0]
-
-        total_area = 0.0
-        weighted_height = 0.0
-        all_coords = []
-
-        for b in cluster:
-            coords = b["coords"]
-            area = self.geometry.calculate_polygon_area(coords)
-            total_area += area
-            weighted_height += b["height"] * area
-            all_coords.extend(coords)
-
-        avg_height = (
-            weighted_height / total_area if total_area > 0 else cluster[0]["height"]
-        )
-        hull_coords = self._create_artistic_hull(all_coords)
-
-        return {
-            "coords": hull_coords,
-            "height": avg_height,
-            "is_cluster": True,
-            "size": len(cluster),
-        }
-
-    def _add_artistic_variation(self, coords):
-        """Add small coordinate perturbations for artistic effect"""
-        varied = []
-        variance = self.style["height_variance"]
-        style = self.style["artistic_style"]
-
-        if style == "modern":
-            for i, (x, y) in enumerate(coords):
-                offset = variance * sin(i * pi / len(coords))
-                varied.append([x + offset, y + offset])
-        elif style == "classic":
-            for i, (x, y) in enumerate(coords):
-                angle = 2.0 * pi * i / len(coords)
-                offset_x = variance * cos(angle)
-                offset_y = variance * sin(angle)
-                varied.append([x + offset_x, y + offset_y])
-        else:  # minimal or block-combine
-            varied = coords
-
-        return varied
-
-    def _create_artistic_hull(self, points):
-        """Sort points by angle around centroid and optionally add detail"""
-        if len(points) < 3:
-            return points
-
-        center = self.geometry.calculate_centroid(points)
-        sorted_points = sorted(
-            points, key=lambda p: atan2(p[1] - center[1], p[0] - center[0])
-        )
-        hull = []
-        detail_level = self.style["detail_level"]
-
-        for i in range(len(sorted_points)):
-            p1 = sorted_points[i]
-            p2 = sorted_points[(i + 1) % len(sorted_points)]
-            hull.append(p1)
-
-            if detail_level > 0.5:
-                dist = self.geometry.calculate_distance(p1, p2)
-                if dist > self.style["cluster_size"]:
-                    num_points = int(detail_level * dist / self.style["cluster_size"])
-                    for j in range(num_points):
-                        t = (j + 1) / (num_points + 1)
-                        mx = p1[0] + t * (p2[0] - p1[0])
-                        my = p1[1] + t * (p2[1] - p1[1])
-                        offset = self.style["height_variance"] * sin(t * pi)
-                        hull.append([mx + offset, my - offset])
-
-        hull = self._add_artistic_variation(hull)
-        return hull
-
-    def set_current_features(self, features):
-        """Store current features for block-combine style to use"""
-        self.current_features = features
-
-```
-
 # lib/style/__init__.py
 
 ```py
@@ -2220,7 +1988,7 @@ class BlockCombiner:
                 'max_height': 25.0,
                 'roof_styles': [
                     {'name': 'pitched', 'height_factor': 0.3},
-                    {'name': 'tiered', 'levels': 20},
+                    {'name': 'tiered', 'levels': 2},
                     {'name': 'flat', 'border': 1.0}
                 ]
             },
@@ -2228,18 +1996,18 @@ class BlockCombiner:
                 'min_height': 15.0,
                 'max_height': 35.0,
                 'roof_styles': [
-                    #{'name': 'sawtooth', 'angle': 30},
+                    {'name': 'sawtooth', 'angle': 30},
                     {'name': 'flat', 'border': 2.0},
-                    {'name': 'stepped', 'levels': 30}
+                    {'name': 'stepped', 'levels': 2}
                 ]
             },
             'commercial': {
                 'min_height': 20.0,
                 'max_height': 40.0,
                 'roof_styles': [
-                    {'name': 'modern', 'setback': 30.0},
-                    {'name': 'tiered', 'levels': 30},
-                    {'name': 'complex', 'variations': 4}
+                    {'name': 'modern', 'setback': 2.0},
+                    {'name': 'tiered', 'levels': 2},
+                    {'name': 'complex', 'variations': 5}
                 ]
             }
         }
@@ -2264,10 +2032,10 @@ class BlockCombiner:
                 'name': 'flat',
                 'border': random.uniform(0.8, 1.2)
             },
-            #{
-            #    'name': 'sawtooth',
-            #    'angle': random.randint(25, 35)
-            #},
+            {
+                'name': 'sawtooth',
+                'angle': random.randint(25, 35)
+            },
             {
                 'name': 'modern',
                 'setback': random.uniform(1.8, 2.2)
@@ -2763,8 +2531,8 @@ class BlockCombiner:
             choice['levels'] = max(1, choice['levels'] + random.randint(-1, 1))
         elif choice['name'] == 'flat':
             choice['border'] *= random.uniform(0.9, 1.1)
-        #elif choice['name'] == 'sawtooth':
-        #    choice['angle'] = max(10, choice['angle'] + random.randint(-5, 5))
+        elif choice['name'] == 'sawtooth':
+            choice['angle'] = max(10, choice['angle'] + random.randint(-5, 5))
         elif choice['name'] == 'modern':
             choice['setback'] *= random.uniform(0.9, 1.1)
         elif choice['name'] == 'stepped':
@@ -2972,7 +2740,7 @@ class BuildingGenerator:
             'pitched': self._generate_pitched_roof,
             'tiered': self._generate_tiered_roof,
             'flat': self._generate_flat_roof,
-            #'sawtooth': self._generate_sawtooth_roof,
+            'sawtooth': self._generate_sawtooth_roof,
             'modern': self._generate_modern_roof,
             'stepped': self._generate_stepped_roof
         }
@@ -3139,7 +2907,6 @@ class BuildingGenerator:
                 {' '.join(steps)}
             }}"""
 
-    def _generate_complex_roof(self, points_str, height, params):
         """
         Generate a complex roof with multiple architectural features.
         
@@ -3295,6 +3062,42 @@ body {
   padding-bottom: 20px;
 }
 
+.preview-container {
+  margin-top: 20px;
+}
+
+.preview-container img {
+  max-width: 100%;
+  border: 1px solid #ddd;
+  padding: 5px;
+}
+
+.download-links a {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.log-container {
+  margin-top: 20px;
+}
+
+#liveLog {
+  background-color: #1e1e1e;
+  color: #cfcfcf;
+  padding: 10px;
+  border-radius: 5px;
+  min-height: 100px;
+  max-height: 600px;
+  overflow-y: scroll;
+  font-family: monospace;
+  white-space: pre;
+}
+
+.processing-indicator {
+  display: none;
+  color: #007bff;
+  margin-bottom: 10px;
+}
 ```
 
 # README.md
@@ -3585,307 +3388,217 @@ app.use("/outputs", express.static("outputs"));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Ensure uploads/outputs folders exist
+// Define directories
 const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
 const outputsDir = path.join(__dirname, "outputs");
-if (!fs.existsSync(outputsDir)) {
-  fs.mkdirSync(outputsDir);
-}
+
+// Ensure required directories exist
+[uploadsDir, outputsDir].forEach((dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir);
+  }
+});
 
 // Configure Multer storage
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/");
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + uuidv4();
-    cb(null, uniqueSuffix + "-" + file.originalname);
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${uuidv4()}`;
+    cb(null, `${uniqueSuffix}-${file.originalname}`);
   },
 });
 
 // Only allow .geojson files
-function fileFilter(req, file, cb) {
+const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
-  if (ext === ".geojson") {
-    cb(null, true);
-  } else {
-    cb(new Error("Invalid file type. Only .geojson files are allowed."));
+  ext === ".geojson"
+    ? cb(null, true)
+    : cb(new Error("Invalid file type. Only .geojson files are allowed."));
+};
+
+const upload = multer({ storage, fileFilter });
+
+// Shared argument processing functions
+const processBasicOptions = (body, args) => {
+  const numberOptions = [
+    "size",
+    "height",
+    "detail",
+    "merge-distance",
+    "cluster-size",
+    "height-variance",
+    "road-width",
+    "water-depth",
+    "min-building-area",
+  ];
+
+  numberOptions.forEach((opt) => {
+    if (body[opt]) args.push(`--${opt}`, body[opt]);
+  });
+
+  if (body.style) args.push("--style", body.style);
+  if (body.debug === "on") args.push("--debug");
+};
+
+const processBridgeOptions = (body, args) => {
+  const bridgeOptions = ["bridge-height", "bridge-thickness", "support-width"];
+  bridgeOptions.forEach((opt) => {
+    if (body[opt]) args.push(`--${opt}`, body[opt]);
+  });
+};
+
+const processPreprocessingOptions = (body, args) => {
+  if (body.preprocess === "on") args.push("--preprocess");
+  if (body["crop-distance"])
+    args.push("--crop-distance", body["crop-distance"]);
+
+  if (body["crop-bbox"]) {
+    const bbox = body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      args.push("--crop-bbox", ...bbox.map(String));
+    }
   }
-}
+};
 
-// Create Multer instance with storage + fileFilter
-const upload = multer({ storage: storage, fileFilter: fileFilter });
+const processPreviewOptions = (body, args) => {
+  if (body["preview-size-width"] && body["preview-size-height"]) {
+    args.push(
+      "--preview-size",
+      body["preview-size-width"],
+      body["preview-size-height"]
+    );
+  }
+  if (body["preview-file"]) args.push("--preview-file", body["preview-file"]);
+  if (body.watch === "on") args.push("--watch");
+  if (body["openscad-path"])
+    args.push("--openscad-path", body["openscad-path"]);
+};
 
-// -------------------------------------
-// ROUTES
-// -------------------------------------
+const processExportOptions = (body, args) => {
+  if (body.export) args.push("--export", body.export);
+  if (body["output-stl"]) args.push("--output-stl", body["output-stl"]);
+  if (body["no-repair"] === "on") args.push("--no-repair");
+  if (body.force === "on") args.push("--force");
+};
 
-// Home route
-app.get("/", (req, res) => {
-  res.render("index");
-});
+const buildPythonArgs = (inputFile, outputFile, body) => {
+  const args = [
+    path.join(__dirname, "geojson_to_shadow_city.py"),
+    inputFile,
+    outputFile,
+  ];
 
-// Endpoint to handle AJAX file upload
+  processBasicOptions(body, args);
+  processBridgeOptions(body, args);
+  processPreprocessingOptions(body, args);
+  processPreviewOptions(body, args);
+
+  return args;
+};
+
+// Route handlers
+app.get("/", (req, res) => res.render("index"));
+
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
-  // If Multer’s fileFilter rejects the file, req.file will be undefined
   if (!req.file) {
     return res
       .status(400)
       .json({ error: "No valid .geojson file was uploaded." });
   }
-  const filePath = path.join(__dirname, req.file.path);
-  res.json({ filePath: filePath });
+  res.json({ filePath: path.join(__dirname, req.file.path) });
 });
 
-// Live preview endpoint
-app.post("/preview", (req, res) => {
-  const uploadedFile = req.body.uploadedFile;
-  if (!uploadedFile) {
-    return res.status(400).json({ error: "No uploaded file provided." });
-  }
-  const outputBase = "preview-" + Date.now() + "-" + uuidv4();
-  const outputScad = path.join(outputsDir, outputBase + ".scad");
+const runPythonProcess = (args) => {
+  return new Promise((resolve, reject) => {
+    const pythonProcess = spawn("python3", args);
+    let stdoutData = "";
+    let stderrData = "";
 
-  let args = [
-    path.join(__dirname, "geojson_to_shadow_city.py"),
-    uploadedFile,
-    outputScad,
-    "--export",
-    "preview",
-  ];
+    pythonProcess.stdout.on("data", (data) => {
+      stdoutData += data.toString();
+    });
 
-  // Basic options
-  if (req.body.size) args.push("--size", req.body.size);
-  if (req.body.height) args.push("--height", req.body.height);
-  if (req.body.style) args.push("--style", req.body.style);
-  if (req.body.detail) args.push("--detail", req.body.detail);
-  if (req.body["merge-distance"])
-    args.push("--merge-distance", req.body["merge-distance"]);
-  if (req.body["cluster-size"])
-    args.push("--cluster-size", req.body["cluster-size"]);
-  if (req.body["height-variance"])
-    args.push("--height-variance", req.body["height-variance"]);
-  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
-  if (req.body["water-depth"])
-    args.push("--water-depth", req.body["water-depth"]);
-  if (req.body["min-building-area"])
-    args.push("--min-building-area", req.body["min-building-area"]);
-  if (req.body.debug === "on") args.push("--debug");
+    pythonProcess.stderr.on("data", (data) => {
+      stderrData += data.toString();
+    });
 
-  // NEW bridging lines
-  if (req.body["bridge-height"]) {
-    args.push("--bridge-height", req.body["bridge-height"]);
-  }
-  if (req.body["bridge-thickness"]) {
-    args.push("--bridge-thickness", req.body["bridge-thickness"]);
-  }
-  if (req.body["support-width"]) {
-    args.push("--support-width", req.body["support-width"]);
-  }
-
-  // Preprocessing
-  if (req.body.preprocess === "on") args.push("--preprocess");
-  if (req.body["crop-distance"])
-    args.push("--crop-distance", req.body["crop-distance"]);
-  if (req.body["crop-bbox"]) {
-    const bbox = req.body["crop-bbox"]
-      .split(",")
-      .map((coord) => coord.trim())
-      .map(Number);
-    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      args.push(
-        "--crop-bbox",
-        bbox[0].toString(),
-        bbox[1].toString(),
-        bbox[2].toString(),
-        bbox[3].toString()
-      );
-    }
-  }
-
-  // Preview integration
-  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
-    args.push(
-      "--preview-size",
-      req.body["preview-size-width"],
-      req.body["preview-size-height"]
-    );
-  }
-  if (req.body["preview-file"]) {
-    args.push("--preview-file", req.body["preview-file"]);
-  }
-  if (req.body.watch === "on") {
-    args.push("--watch");
-  }
-  if (req.body["openscad-path"]) {
-    args.push("--openscad-path", req.body["openscad-path"]);
-  }
-
-  console.log("Live preview generation command:", args.join(" "));
-
-  const pythonProcess = spawn("python3", args);
-  let stdoutData = "";
-  let stderrData = "";
-
-  pythonProcess.stdout.on("data", (data) => {
-    stdoutData += data.toString();
-  });
-  pythonProcess.stderr.on("data", (data) => {
-    stderrData += data.toString();
-  });
-  pythonProcess.on("close", (code) => {
-    if (code !== 0) {
-      console.error("Python preview process exited with code", code);
-      console.error(stderrData);
-      return res.status(500).json({ error: stderrData });
-    }
-    const previewMain = outputBase + "_preview_main.png";
-    const previewFrame = outputBase + "_preview_frame.png";
-
-    res.json({
-      previewMain: "/outputs/" + previewMain,
-      previewFrame: "/outputs/" + previewFrame,
-      stdout: stdoutData,
-      stderr: stderrData,
+    pythonProcess.on("close", (code) => {
+      if (code !== 0) {
+        console.error("Python process exited with code", code);
+        console.error(stderrData);
+        reject(stderrData);
+        return;
+      }
+      resolve({ stdout: stdoutData, stderr: stderrData });
     });
   });
-});
+};
 
-// Final render endpoint
-app.post("/render", (req, res) => {
+app.post("/preview", async (req, res) => {
   const uploadedFile = req.body.uploadedFile;
   if (!uploadedFile) {
     return res.status(400).json({ error: "No uploaded file provided." });
   }
-  const outputBase = "output-" + Date.now() + "-" + uuidv4();
-  const outputPath = path.join(outputsDir, outputBase + ".scad");
 
-  let args = [
-    path.join(__dirname, "geojson_to_shadow_city.py"),
-    uploadedFile,
-    outputPath,
-  ];
+  const outputBase = `preview-${Date.now()}-${uuidv4()}`;
+  const outputScad = path.join(outputsDir, `${outputBase}.scad`);
 
-  // Basic options
-  if (req.body.size) args.push("--size", req.body.size);
-  if (req.body.height) args.push("--height", req.body.height);
-  if (req.body.style) args.push("--style", req.body.style);
-  if (req.body.detail) args.push("--detail", req.body.detail);
-  if (req.body["merge-distance"])
-    args.push("--merge-distance", req.body["merge-distance"]);
-  if (req.body["cluster-size"])
-    args.push("--cluster-size", req.body["cluster-size"]);
-  if (req.body["height-variance"])
-    args.push("--height-variance", req.body["height-variance"]);
-  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
-  if (req.body["water-depth"])
-    args.push("--water-depth", req.body["water-depth"]);
-  if (req.body["min-building-area"])
-    args.push("--min-building-area", req.body["min-building-area"]);
-  if (req.body.debug === "on") args.push("--debug");
+  try {
+    const args = buildPythonArgs(uploadedFile, outputScad, req.body);
+    args.push("--export", "preview");
 
-  // NEW bridging lines
-  if (req.body["bridge-height"]) {
-    args.push("--bridge-height", req.body["bridge-height"]);
+    const { stdout, stderr } = await runPythonProcess(args);
+
+    res.json({
+      previewMain: `/outputs/${outputBase}_preview_main.png`,
+      previewFrame: `/outputs/${outputBase}_preview_frame.png`,
+      stdout,
+      stderr,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
   }
-  if (req.body["bridge-thickness"]) {
-    args.push("--bridge-thickness", req.body["bridge-thickness"]);
-  }
-  if (req.body["support-width"]) {
-    args.push("--support-width", req.body["support-width"]);
+});
+
+app.post("/render", async (req, res) => {
+  const uploadedFile = req.body.uploadedFile;
+  if (!uploadedFile) {
+    return res.status(400).json({ error: "No uploaded file provided." });
   }
 
-  // Preprocessing
-  if (req.body.preprocess === "on") args.push("--preprocess");
-  if (req.body["crop-distance"])
-    args.push("--crop-distance", req.body["crop-distance"]);
-  if (req.body["crop-bbox"]) {
-    const bbox = req.body["crop-bbox"]
-      .split(",")
-      .map((coord) => coord.trim())
-      .map(Number);
-    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      args.push(
-        "--crop-bbox",
-        bbox[0].toString(),
-        bbox[1].toString(),
-        bbox[2].toString(),
-        bbox[3].toString()
-      );
-    }
-  }
+  const outputBase = `output-${Date.now()}-${uuidv4()}`;
+  const outputPath = path.join(outputsDir, `${outputBase}.scad`);
 
-  // Export options
-  if (req.body.export) args.push("--export", req.body.export);
-  if (req.body["output-stl"]) args.push("--output-stl", req.body["output-stl"]);
-  if (req.body["no-repair"] === "on") args.push("--no-repair");
-  if (req.body.force === "on") args.push("--force");
+  try {
+    const args = buildPythonArgs(uploadedFile, outputPath, req.body);
+    processExportOptions(req.body, args);
 
-  // Preview & integration
-  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
-    args.push(
-      "--preview-size",
-      req.body["preview-size-width"],
-      req.body["preview-size-height"]
-    );
-  }
-  if (req.body["preview-file"]) {
-    args.push("--preview-file", req.body["preview-file"]);
-  }
-  if (req.body.watch === "on") {
-    args.push("--watch");
-  }
-  if (req.body["openscad-path"]) {
-    args.push("--openscad-path", req.body["openscad-path"]);
-  }
+    const { stdout, stderr } = await runPythonProcess(args);
 
-  console.log("Final render command:", args.join(" "));
+    const response = {
+      mainScad: `/outputs/${outputBase}_main.scad`,
+      frameScad: `/outputs/${outputBase}_frame.scad`,
+      logFile: `/outputs/${outputBase}.scad.log`,
+      stdout,
+      stderr,
+    };
 
-  const pythonProcess = spawn("python3", args);
-  let stdoutData = "";
-  let stderrData = "";
-
-  pythonProcess.stdout.on("data", (data) => {
-    stdoutData += data.toString();
-  });
-  pythonProcess.stderr.on("data", (data) => {
-    stderrData += data.toString();
-  });
-  pythonProcess.on("close", (code) => {
-    if (code !== 0) {
-      console.error("Python final render process exited with code", code);
-      console.error(stderrData);
-      return res.status(500).json({ error: stderrData });
-    }
-    const mainScad = outputBase + "_main.scad";
-    const frameScad = outputBase + "_frame.scad";
-    const logFile = outputBase + ".scad.log";
-
-    let stlFiles = {};
     if (req.body.export === "stl" || req.body.export === "both") {
-      const mainStl = outputBase + "_main.stl";
-      const frameStl = outputBase + "_frame.stl";
-      stlFiles = {
-        mainStl: "/outputs/" + mainStl,
-        frameStl: "/outputs/" + frameStl,
+      response.stlFiles = {
+        mainStl: `/outputs/${outputBase}_main.stl`,
+        frameStl: `/outputs/${outputBase}_frame.stl`,
       };
     }
 
-    res.json({
-      mainScad: "/outputs/" + mainScad,
-      frameScad: "/outputs/" + frameScad,
-      logFile: "/outputs/" + logFile,
-      stlFiles: stlFiles,
-      stdout: stdoutData,
-      stderr: stderrData,
-    });
-  });
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.toString() });
+  }
 });
 
-// Fallback /upload endpoint (if needed)
 app.post("/upload", upload.single("geojson"), (req, res) => {
   if (!req.file) {
     return res.status(400).send("No valid .geojson file was uploaded.");
@@ -3912,44 +3625,7 @@ app.listen(port, () => {
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <style>
-    .preview-container {
-      margin-top: 20px;
-    }
 
-    .preview-container img {
-      max-width: 100%;
-      border: 1px solid #ddd;
-      padding: 5px;
-    }
-
-    .download-links a {
-      display: block;
-      margin-bottom: 5px;
-    }
-
-    .log-container {
-      margin-top: 20px;
-    }
-
-    #liveLog {
-      background-color: #1e1e1e;
-      color: #cfcfcf;
-      padding: 10px;
-      border-radius: 5px;
-      min-height: 100px;
-      max-height: 600px;
-      overflow-y: scroll;
-      font-family: monospace;
-      white-space: pre;
-    }
-
-    .processing-indicator {
-      display: none;
-      color: #007bff;
-      margin-bottom: 10px;
-    }
-  </style>
 </head>
 
 <body>
@@ -4331,59 +4007,6 @@ app.listen(port, () => {
     });
 
   </script>
-</body>
-
-</html>
-```
-
-# views/result.ejs
-
-```ejs
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-  <meta charset="UTF-8">
-  <title>Generation Result</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <link rel="stylesheet" href="/css/style.css">
-</head>
-
-<body>
-  <div class="container">
-    <h1 class="mt-5">Generation Result</h1>
-    <p class="lead">The Shadow City model has been generated. Download the output files below:</p>
-    <ul class="list-group">
-      <li class="list-group-item">
-        <a href="<%= mainScad %>" download>Main Model (SCAD)</a>
-      </li>
-      <li class="list-group-item">
-        <a href="<%= frameScad %>" download>Frame Model (SCAD)</a>
-      </li>
-      <% if (stlFiles && stlFiles.mainStl) { %>
-        <li class="list-group-item">
-          <a href="<%= stlFiles.mainStl %>" download>Main Model (STL)</a>
-        </li>
-        <li class="list-group-item">
-          <a href="<%= stlFiles.frameStl %>" download>Frame Model (STL)</a>
-        </li>
-        <% } %>
-          <li class="list-group-item">
-            <a href="<%= logFile %>" download>Debug Log</a>
-          </li>
-    </ul>
-    <hr>
-    <h3>Process Output</h3>
-    <div class="card">
-      <div class="card-body">
-        <h5>Standard Output</h5>
-        <pre><%= stdout %></pre>
-        <h5>Error Output</h5>
-        <pre><%= stderr %></pre>
-      </div>
-    </div>
-    <a href="/" class="btn btn-secondary mt-3">Back to Home</a>
-  </div>
 </body>
 
 </html>

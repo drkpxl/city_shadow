@@ -48,9 +48,9 @@ class OpenSCADIntegration:
         """Generate preview using PreviewGenerator."""
         return self.preview_generator.generate(output_file, output_image, size)
 
-    def generate_stl(self, scad_file, output_stl, repair=True):
-        """Generate STL using ExportManager."""
-        return self.export_manager.generate_stl(scad_file, output_stl, repair)
+    def generate_stl(self, scad_file, output_stl):
+        """Generate STL files using ExportManager."""
+        return self.export_manager.generate_stl(scad_file, output_stl)
 
     def watch_and_reload(self, scad_file):
         """Watch SCAD file using FileWatcher."""

@@ -1,8 +1,3 @@
-# lib/preview/export_manager.py
-import os
-import subprocess
-
-
 class ExportManager:
     def __init__(self, openscad_path):
         self.openscad_path = openscad_path
@@ -12,7 +7,7 @@ class ExportManager:
             "fs": 0.2,
         }
 
-    def generate_stl(self, scad_file, output_stl, repair=True):
+    def generate_stl(self, scad_file, output_stl):
         """Generate STL files for both main model and frame."""
         try:
             main_scad_file = scad_file.replace(".scad", "_main.scad")

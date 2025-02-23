@@ -7,7 +7,7 @@ class PreviewGenerator:
     def __init__(self, openscad_path):
         self.openscad_path = openscad_path
 
-    def generate(self, output_file, output_image, size=(1920, 1080)):
+    def generate(self, output_file, output_image, size=(1080, 1080)):
         """Generate preview images for both main model and frame."""
         main_scad_file = output_file.replace(".scad", "_main.scad")
         frame_scad_file = output_file.replace(".scad", "_frame.scad")

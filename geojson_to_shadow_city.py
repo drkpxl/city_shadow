@@ -66,7 +66,7 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
-    # NEW arguments for bridge parameters:
+    # Bridge parameters
     parser.add_argument(
         "--bridge-height",
         type=float,
@@ -104,27 +104,6 @@ def main():
         help="Bounding box coordinates for cropping",
     )
 
-    # Export format group
-    export_group = parser.add_argument_group("Export Options")
-    export_group.add_argument(
-        "--export",
-        choices=["preview", "stl", "both"],
-        help="Export format (preview image, STL, or both)",
-    )
-    export_group.add_argument(
-        "--output-stl", help="Output STL filename (default: based on SCAD filename)"
-    )
-    export_group.add_argument(
-        "--no-repair",
-        action="store_true",
-        help="Disable automatic geometry repair attempts",
-    )
-    export_group.add_argument(
-        "--force",
-        action="store_true",
-        help="Force STL generation even if validation fails",
-    )
-
     # Preview options
     preview_group = parser.add_argument_group("Preview and Integration")
     preview_group.add_argument(
@@ -157,8 +136,6 @@ def main():
             "cluster_size": args.cluster_size,
             "height_variance": args.height_variance,
             "min_building_area": args.min_building_area,
-
-            # NEW lines for bridging:
             "bridge_height": args.bridge_height,
             "bridge_thickness": args.bridge_thickness,
             "support_width": args.support_width,
@@ -194,48 +171,32 @@ def main():
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
 
-        # Handle exports if requested
-        if args.export or args.watch:
-            integration = OpenSCADIntegration(args.openscad_path)
+        # Set up OpenSCAD integration
+        integration = OpenSCADIntegration(args.openscad_path)
 
-            # Determine output filenames
-            stl_file = args.output_stl or args.output_scad.replace(".scad", ".stl")
-            preview_file = args.preview_file or args.output_scad.replace(
-                ".scad", "_preview.png"
+        # Generate preview images
+        preview_file = args.preview_file or args.output_scad.replace(".scad", "_preview.png")
+        if args.preview_size:
+            print("\nGenerating preview image...")
+            integration.generate_preview(
+                args.output_scad, preview_file, size=args.preview_size
             )
 
-            if args.export in ["preview", "both"]:
-                print("\nGenerating preview image...")
-                integration.generate_preview(
-                    args.output_scad, preview_file, size=args.preview_size
-                )
+        # Always generate STL files
+        print("\nGenerating STL files...")
+        stl_file = args.output_scad.replace(".scad", ".stl")
+        integration.generate_stl(args.output_scad, stl_file)
 
-            if args.export in ["stl", "both"]:
-                print("\nGenerating STL file...")
-                try:
-                    integration.generate_stl(
-                        args.output_scad, stl_file, repair=not args.no_repair
-                    )
-                except Exception as e:
-                    if args.force:
-                        print(f"Warning: {str(e)}")
-                        print("Forcing STL generation due to --force flag...")
-                        integration.generate_stl(
-                            args.output_scad, stl_file, repair=False
-                        )
-                    else:
-                        raise
-
-            if args.watch:
-                print("\nStarting OpenSCAD integration...")
-                print("Press Ctrl+C to stop watching")
-                integration.watch_and_reload(args.output_scad)
-                try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    integration.stop_watching()
-                    print("\nStopped watching SCAD file")
+        if args.watch:
+            print("\nStarting OpenSCAD integration...")
+            print("Press Ctrl+C to stop watching")
+            integration.watch_and_reload(args.output_scad)
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                integration.stop_watching()
+                print("\nStopped watching SCAD file")
 
     except Exception as e:
         print(f"Error: {str(e)}")
