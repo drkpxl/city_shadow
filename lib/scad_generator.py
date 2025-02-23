@@ -65,11 +65,15 @@ difference() {{
                 points_str, building_height, is_cluster, is_industrial
             )
 
+            # Wrap building details in white color
             scad.append(
                 f"""
     // {building_type} {i+1}
     translate([0, 0, {base_height}]) {{
-        {details}
+        color("white")
+        {{
+            {details}
+        }}
     }}"""
             )
 
@@ -178,8 +182,11 @@ difference() {{
                     f"""
         // Water body {i+1}
         translate([0, 0, {base_height - water_depth}])
-            linear_extrude(height={water_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);"""
+            color("blue")
+            {{
+                linear_extrude(height={water_depth + 0.1}, convexity=2)
+                    polygon([{points_str}]);
+            }}"""
                 )
 
         return "\n".join(scad)
@@ -207,12 +214,16 @@ difference() {{
                     )
 
             if points_str:
+                color_val = "green" if is_parking else "black"
                 scad.append(
                     f"""
         // {"Parking Area" if is_parking else "Road"} {i+1}
         translate([0, 0, {base_height - road_depth}])
-            linear_extrude(height={road_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);"""
+            color("{color_val}")
+            {{
+                linear_extrude(height={road_depth + 0.1}, convexity=2)
+                    polygon([{points_str}]);
+            }}"""
                 )
 
         return "\n".join(scad)
@@ -235,8 +246,11 @@ difference() {{
                     f"""
         // Railway {i+1}
         translate([0, 0, {base_height - railway_depth}])
-            linear_extrude(height={railway_depth + 0.1}, convexity=2)
-                polygon([{points_str}]);"""
+            color("brown")
+            {{
+                linear_extrude(height={railway_depth + 0.1}, convexity=2)
+                    polygon([{points_str}]);
+            }}"""
                 )
 
         return "\n".join(scad)
@@ -260,16 +274,19 @@ difference() {{
                 start_point = coords[0]
                 end_point = coords[-1]
 
+                # Using red color for unspecified features (bridges)
                 scad.append(
                     f"""
         // Bridge {i+1}
         union() {{
-            // Main bridge deck
-            translate([0, 0, {base_height + bridge_height}])
-                linear_extrude(height={bridge_thickness}, convexity=2)
-                    polygon([{points_str}]);
-            
-            // Bridge supports
+            color("red")
+            {{
+                // Main bridge deck
+                translate([0, 0, {base_height + bridge_height}])
+                    linear_extrude(height={bridge_thickness}, convexity=2)
+                        polygon([{points_str}]);
+            }}
+            // Bridge supports (remain uncolored for clarity)
             translate([{start_point[0]}, {start_point[1]}, {base_height}])
                 cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
             translate([{end_point[0]}, {end_point[1]}, {base_height}])
