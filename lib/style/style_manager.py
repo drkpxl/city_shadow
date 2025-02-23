@@ -2,6 +2,7 @@
 from .building_merger import BuildingMerger
 from .height_manager import HeightManager
 from .artistic_effects import ArtisticEffects
+from .block_combiner import BlockCombiner
 
 
 class StyleManager:
@@ -24,20 +25,21 @@ class StyleManager:
         self.building_merger = BuildingMerger(self)
         self.height_manager = HeightManager(self)
         self.artistic_effects = ArtisticEffects(self)
+        self.block_combiner = BlockCombiner(self)
         self.current_features = {}
 
     def get_default_layer_specs(self):
         """Get default layer specifications."""
         return {
-            "water": {"depth": 3},
-            "roads": {"depth": 0.4, "width": 2.0},
+            "water": {"depth": 2.4},
+            "roads": {"depth": 0.4, "width": 1.0},
             "railways": {"depth": 0.6, "width": 1.5},
             "parks": {
                 "start_offset": 0.2,  # top of base + 0.2
                 "thickness": 0.4
             },
-            "buildings": {"min_height": 2, "max_height": 6},
-            "base": {"height": 10},
+            "buildings": {"min_height": 2, "max_height": 8},
+            "base": {"height": 3},
         }
 
     def scale_building_height(self, properties):
@@ -45,8 +47,13 @@ class StyleManager:
         return self.height_manager.scale_height(properties)
 
     def merge_nearby_buildings(self, buildings, barrier_union=None):
-        """Merge buildings using BuildingMerger."""
-        return self.building_merger.merge_buildings(buildings, barrier_union)
+        """Choose merging strategy based on style."""
+        if self.style["artistic_style"] == "block-combine":
+            # This calls our new block combiner code
+            return self.block_combiner.combine_buildings_by_block(self.current_features)
+        else:
+            # Original distance-based approach
+            return self.building_merger.merge_buildings(buildings, barrier_union)
 
     def set_current_features(self, features):
         """Store current features."""

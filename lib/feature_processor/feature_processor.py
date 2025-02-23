@@ -7,10 +7,8 @@ from .road_processor import RoadProcessor
 from .railway_processor import RailwayProcessor
 from .water_processor import WaterProcessor
 from .barrier_processor import create_barrier_union
-from.park_processor import ParkProcessor
-
+from .park_processor import ParkProcessor
 from ..geometry import GeometryUtils
-
 
 class FeatureProcessor:
     def __init__(self, style_manager):
@@ -26,13 +24,11 @@ class FeatureProcessor:
         self.water_proc = WaterProcessor(self.geometry, style_manager, debug=self.debug)
         self.park_proc = ParkProcessor(self.geometry, style_manager, debug=self.debug)
         
-        
     def process_features(self, geojson_data, size):
         """
-        Parse the GeoJSON and gather features by category: water, roads, railways, buildings, etc.
-        Then merge buildings if needed, returning the final dictionary of feature lists.
+        Parse the GeoJSON and gather features by category.
+        Updated to better handle industrial areas.
         """
-
         # Create lat/lon -> model transform
         transform = self.geometry.create_coordinate_transformer(geojson_data["features"], size)
 
@@ -47,60 +43,47 @@ class FeatureProcessor:
             "parks": []
         }
 
-        # First pass: handle everything except industrial landuse
+        # First pass: process all features
         for feature in geojson_data["features"]:
             props = feature.get("properties", {})
 
+            # Check for industrial features first
+            if self.industrial_proc.should_process_as_industrial(props):
+                if props.get("building"):
+                    self.industrial_proc.process_industrial_building(feature, features, transform)
+                else:
+                    self.industrial_proc.process_industrial_area(feature, features, transform)
+                continue
 
-            # Water (e.g., rivers, lakes, ponds)
+            # Process other feature types...
             if props.get("natural") == "water":
                 self.water_proc.process_water(feature, features, transform)
-                continue
-
-            # Industrial buildings
-            if props.get("building") == "industrial":
-                self.industrial_proc.process_industrial_building(feature, features, transform)
-                continue
-
-            # "Regular" building
-            if "building" in props:
+            elif "building" in props:
                 self.building_proc.process_building(feature, features, transform)
-                continue
-
-            # Parking vs roads vs bridges
-            if self.road_proc.is_parking_area(props):
+            elif self.road_proc.is_parking_area(props):
                 self.road_proc.process_parking(feature, features, transform)
-                continue
-            if "highway" in props:
+            elif "highway" in props:
                 self.road_proc.process_road_or_bridge(feature, features, transform)
-                continue
-
-            # Railways
-            if "railway" in props:
+            elif "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
-                continue
-            # Parks or "green" landuse
-            if ("leisure" in props) or ("landuse" in props):
+            elif ("leisure" in props) or ("landuse" in props):
                 self.park_proc.process_park(feature, features, transform)
-                continue
 
-        # Second pass: handle industrial landuse polygons
-        for feature in geojson_data["features"]:
-            props = feature.get("properties", {})
-            if props.get("landuse") == "industrial":
-                self.industrial_proc.process_industrial_area(feature, features, transform)
-
-
-        # Store features in style manager (so merges can see them)
+        # Store features in style manager
         self.style_manager.set_current_features(features)
 
-        # If debug is on, print summary
+        # Debug summary
         if self.debug:
             print(f"\nProcessed feature counts:")
             for cat, items in features.items():
                 print(f"  {cat}: {len(items)}")
+                if cat == "industrial":
+                    buildings = sum(1 for x in items if "building_type" in x)
+                    areas = sum(1 for x in items if "landuse_type" in x)
+                    print(f"    - Industrial buildings: {buildings}")
+                    print(f"    - Industrial areas: {areas}")
 
-        # Build a union of roads, rails, water to use as a barrier for building merges
+        # Create barrier union and merge buildings
         barrier_union = create_barrier_union(
             roads=features["roads"],
             railways=features["railways"],
@@ -109,7 +92,7 @@ class FeatureProcessor:
             railway_buffer=1.0,
         )
 
-        # Merge all buildings + industrial into a single list
+        # Merge buildings + industrial
         all_buildings = features["buildings"] + features["industrial"]
         merged_bldgs = self.style_manager.merge_nearby_buildings(all_buildings, barrier_union)
         features["buildings"] = merged_bldgs

@@ -152,7 +152,7 @@ def main():
         type=int,
         nargs=2,
         metavar=("WIDTH", "HEIGHT"),
-        default=[1920, 1080],
+        default=[1080, 1080],
         help="Preview image size in pixels",
     )
     preview_group.add_argument(
@@ -542,10 +542,8 @@ from .road_processor import RoadProcessor
 from .railway_processor import RailwayProcessor
 from .water_processor import WaterProcessor
 from .barrier_processor import create_barrier_union
-from.park_processor import ParkProcessor
-
+from .park_processor import ParkProcessor
 from ..geometry import GeometryUtils
-
 
 class FeatureProcessor:
     def __init__(self, style_manager):
@@ -561,13 +559,11 @@ class FeatureProcessor:
         self.water_proc = WaterProcessor(self.geometry, style_manager, debug=self.debug)
         self.park_proc = ParkProcessor(self.geometry, style_manager, debug=self.debug)
         
-        
     def process_features(self, geojson_data, size):
         """
-        Parse the GeoJSON and gather features by category: water, roads, railways, buildings, etc.
-        Then merge buildings if needed, returning the final dictionary of feature lists.
+        Parse the GeoJSON and gather features by category.
+        Updated to better handle industrial areas.
         """
-
         # Create lat/lon -> model transform
         transform = self.geometry.create_coordinate_transformer(geojson_data["features"], size)
 
@@ -582,60 +578,47 @@ class FeatureProcessor:
             "parks": []
         }
 
-        # First pass: handle everything except industrial landuse
+        # First pass: process all features
         for feature in geojson_data["features"]:
             props = feature.get("properties", {})
 
+            # Check for industrial features first
+            if self.industrial_proc.should_process_as_industrial(props):
+                if props.get("building"):
+                    self.industrial_proc.process_industrial_building(feature, features, transform)
+                else:
+                    self.industrial_proc.process_industrial_area(feature, features, transform)
+                continue
 
-            # Water (e.g., rivers, lakes, ponds)
+            # Process other feature types...
             if props.get("natural") == "water":
                 self.water_proc.process_water(feature, features, transform)
-                continue
-
-            # Industrial buildings
-            if props.get("building") == "industrial":
-                self.industrial_proc.process_industrial_building(feature, features, transform)
-                continue
-
-            # "Regular" building
-            if "building" in props:
+            elif "building" in props:
                 self.building_proc.process_building(feature, features, transform)
-                continue
-
-            # Parking vs roads vs bridges
-            if self.road_proc.is_parking_area(props):
+            elif self.road_proc.is_parking_area(props):
                 self.road_proc.process_parking(feature, features, transform)
-                continue
-            if "highway" in props:
+            elif "highway" in props:
                 self.road_proc.process_road_or_bridge(feature, features, transform)
-                continue
-
-            # Railways
-            if "railway" in props:
+            elif "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
-                continue
-            # Parks or "green" landuse
-            if ("leisure" in props) or ("landuse" in props):
+            elif ("leisure" in props) or ("landuse" in props):
                 self.park_proc.process_park(feature, features, transform)
-                continue
 
-        # Second pass: handle industrial landuse polygons
-        for feature in geojson_data["features"]:
-            props = feature.get("properties", {})
-            if props.get("landuse") == "industrial":
-                self.industrial_proc.process_industrial_area(feature, features, transform)
-
-
-        # Store features in style manager (so merges can see them)
+        # Store features in style manager
         self.style_manager.set_current_features(features)
 
-        # If debug is on, print summary
+        # Debug summary
         if self.debug:
             print(f"\nProcessed feature counts:")
             for cat, items in features.items():
                 print(f"  {cat}: {len(items)}")
+                if cat == "industrial":
+                    buildings = sum(1 for x in items if "building_type" in x)
+                    areas = sum(1 for x in items if "landuse_type" in x)
+                    print(f"    - Industrial buildings: {buildings}")
+                    print(f"    - Industrial areas: {areas}")
 
-        # Build a union of roads, rails, water to use as a barrier for building merges
+        # Create barrier union and merge buildings
         barrier_union = create_barrier_union(
             roads=features["roads"],
             railways=features["railways"],
@@ -644,7 +627,7 @@ class FeatureProcessor:
             railway_buffer=1.0,
         )
 
-        # Merge all buildings + industrial into a single list
+        # Merge buildings + industrial
         all_buildings = features["buildings"] + features["industrial"]
         merged_bldgs = self.style_manager.merge_nearby_buildings(all_buildings, barrier_union)
         features["buildings"] = merged_bldgs
@@ -659,7 +642,6 @@ class FeatureProcessor:
         the coastline but within the bounding box.
         """
         return box(0, 0, size, size)
-
 ```
 
 # lib/feature_processor/industrial_processor.py
@@ -670,6 +652,24 @@ from shapely.geometry import Polygon
 from .base_processor import BaseProcessor
 
 class IndustrialProcessor(BaseProcessor):
+    # Define industrial-related tags to look for
+    INDUSTRIAL_LANDUSE = {
+        'industrial',
+        'construction',
+        'depot',
+        'logistics',
+        'port',
+        'warehouse'
+    }
+    
+    INDUSTRIAL_BUILDINGS = {
+        'industrial',
+        'warehouse',
+        'factory',
+        'manufacturing',
+        'hangar'
+    }
+
     def process_industrial_building(self, feature, features, transform):
         """Process an industrial building with specific handling."""
         props = feature.get("properties", {})
@@ -677,6 +677,7 @@ class IndustrialProcessor(BaseProcessor):
         if not coords:
             return
 
+        # Get area and check against minimum
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
@@ -686,39 +687,121 @@ class IndustrialProcessor(BaseProcessor):
             return
 
         transformed = [transform(lon, lat) for lon, lat in coords]
-        height = self.style_manager.scale_building_height(props)
+        
+        # Calculate height using our detailed calculator
+        layer_specs = self.style_manager.get_default_layer_specs()
+        min_height = layer_specs["buildings"]["min_height"]
+        max_height = layer_specs["buildings"]["max_height"]
+        
+        # Use explicit height if available, otherwise use industrial multiplier
+        height_m = self._get_explicit_height(props)
+        if height_m is not None:
+            base_height = self.style_manager.scale_building_height({
+                "height": str(height_m)
+            })
+            height = base_height * 1.5  # 50% bonus
+        else:
+            # Default to twice minimum height for industrial buildings
+            height = min(max_height, min_height * 2.0)
 
-        # Ensure a minimum building height
-        min_height = self.style_manager.get_default_layer_specs()["buildings"]["min_height"]
-        height = max(height, min_height)
-
-        features["industrial"].append(
-            {"coords": transformed, "height": height, "is_industrial": True}
-        )
+        features["industrial"].append({
+            "coords": transformed,
+            "height": height,
+            "is_industrial": True,
+            "building_type": props.get("building", "industrial")
+        })
+        
         if self.debug:
             print(f"Added industrial building, height {height:.1f}mm, area {area_m2:.1f}m²")
 
     def process_industrial_area(self, feature, features, transform):
-        """Process industrial landuse areas as potential buildings."""
+        """Process industrial landuse areas as buildings."""
         props = feature.get("properties", {})
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
+        # Check if this is an industrial area
+        landuse = props.get("landuse", "").lower()
+        if landuse not in self.INDUSTRIAL_LANDUSE:
+            return
+
         # Transform coordinates
         transformed = [transform(lon, lat) for lon, lat in coords]
 
-        # Use a minimum height for industrial areas
-        min_height = self.style_manager.get_default_layer_specs()["buildings"]["min_height"]
+        # Calculate area and filter small areas
+        area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+        min_area = self.style_manager.style.get("min_building_area", 600.0)
 
-        # If block-combine style, these will merge with others
-        if self.style_manager.style["artistic_style"] == "block-combine":
-            features["industrial"].append(
-                {"coords": transformed, "height": min_height, "is_industrial": True}
-            )
+        if area_m2 < min_area:
             if self.debug:
-                print(f"Added industrial area with height {min_height}mm")
+                print(f"Skipping small industrial area with area {area_m2:.1f}m²")
+            return
 
+        # Set height based on landuse type
+        layer_specs = self.style_manager.get_default_layer_specs()
+        min_height = layer_specs["buildings"]["min_height"]
+        max_height = layer_specs["buildings"]["max_height"]
+        
+        # Different heights for different types
+        height_multipliers = {
+            'industrial': 2.0,
+            'construction': 1.5,
+            'depot': 1.5,
+            'logistics': 1.8,
+            'port': 2.0,
+            'warehouse': 1.7
+        }
+        
+        multiplier = height_multipliers.get(landuse, 1.5)
+        height = min(max_height, min_height * multiplier)
+
+        features["industrial"].append({
+            "coords": transformed,
+            "height": height,
+            "is_industrial": True,
+            "landuse_type": landuse
+        })
+
+        if self.debug:
+            print(f"Added industrial area type '{landuse}' with height {height:.1f}mm")
+
+    def should_process_as_industrial(self, properties):
+        """Check if a feature should be processed as industrial."""
+        if not properties:
+            return False
+            
+        # Check building tag
+        building = properties.get("building", "").lower()
+        if building in self.INDUSTRIAL_BUILDINGS:
+            return True
+            
+        # Check landuse tag
+        landuse = properties.get("landuse", "").lower()
+        if landuse in self.INDUSTRIAL_LANDUSE:
+            return True
+            
+        return False
+
+    def _get_explicit_height(self, properties):
+        """Extract explicit height from properties if available."""
+        # Check explicit height tag
+        if "height" in properties:
+            try:
+                height_str = properties["height"].split()[0]  # Handle "10 m" format
+                return float(height_str)
+            except (ValueError, IndexError):
+                pass
+                
+        # Check building levels
+        if "building:levels" in properties:
+            try:
+                levels = float(properties["building:levels"])
+                return levels * 3  # assume 3m per level
+            except ValueError:
+                pass
+                
+        return None
 ```
 
 # lib/feature_processor/park_processor.py
@@ -1268,6 +1351,7 @@ class ExportManager:
         command = [
             self.openscad_path,
             "--backend=Manifold",
+            "--render",
             "--export-format=binstl",
             "-o",
             output_file,
@@ -1539,12 +1623,13 @@ class PreviewGenerator:
 ```py
 from .geometry import GeometryUtils
 from .style.style_manager import StyleManager
-
+from .style.generate_building import BuildingGenerator
 
 class ScadGenerator:
     def __init__(self, style_manager):
         self.style_manager = style_manager
         self.geometry = GeometryUtils()
+        self.building_generator = BuildingGenerator(style_manager)
 
     def generate_openscad(self, features, size, layer_specs):
         """
@@ -1582,7 +1667,7 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_building_features(self, building_features, layer_specs):
-        """Generate OpenSCAD code for building features (unioned on top)"""
+        """Generate OpenSCAD code for building features."""
         scad = []
         base_height = layer_specs["base"]["height"]
 
@@ -1592,24 +1677,19 @@ difference() {{
                 continue
 
             building_height = building["height"]
-            is_cluster = building.get("is_cluster", False)
-            is_industrial = building.get("is_industrial", False)
+            block_type = building.get("block_type", "residential")
+            roof_style = building.get("roof_style", None)
 
-            # Choose appropriate building type label for comments
-            building_type = (
-                "Industrial Building"
-                if is_industrial
-                else "Building Cluster" if is_cluster else "Building"
+            details = self.building_generator.generate_building_details(
+                points_str, 
+                building_height, 
+                roof_style=roof_style,
+                block_type=block_type
             )
 
-            details = self._generate_building_details(
-                points_str, building_height, is_cluster, is_industrial
-            )
-
-            # Wrap building details in white color
             scad.append(
                 f"""
-    // {building_type} {i+1}
+    // Building {i+1}
     translate([0, 0, {base_height}]) {{
         color("white")
         {{
@@ -1619,95 +1699,6 @@ difference() {{
             )
 
         return "\n".join(scad)
-
-    def _generate_building_details(
-        self, points_str, height, is_cluster, is_industrial=False
-    ):
-        """Generate architectural details based on style and building type."""
-        style = self.style_manager.style["artistic_style"]
-        detail_level = self.style_manager.style["detail_level"]
-
-        # Industrial buildings get special treatment
-        if is_industrial:
-            return self._generate_industrial_details(
-                points_str, height, style, detail_level
-            )
-
-        # Simple extrusion for low detail or single buildings
-        if not is_cluster or detail_level < 0.5:
-            return f"""linear_extrude(height={height}, convexity=2)
-    polygon([{points_str}]);"""
-
-        # Style-specific details for regular buildings
-        if style == "modern":
-            return f"""
-    union() {{
-        linear_extrude(height={height}, convexity=2)
-            polygon([{points_str}]);
-        translate([0, 0, {height}])
-            linear_extrude(height=0.8, convexity=2)
-                offset(r=-0.8)
-                    polygon([{points_str}]);
-    }}"""
-        elif style == "classic":
-            return f"""
-    union() {{
-        linear_extrude(height={height}, convexity=2)
-            polygon([{points_str}]);
-        translate([0, 0, {height * 0.8}])
-            linear_extrude(height={height * 0.2}, convexity=2)
-                offset(r=-0.5)
-                    polygon([{points_str}]);
-    }}"""
-        else:  # minimal
-            return f"""linear_extrude(height={height}, convexity=2)
-    polygon([{points_str}]);"""
-
-    def _generate_industrial_details(self, points_str, height, style, detail_level):
-        """Generate industrial-specific architectural details."""
-        if style == "modern":
-            # Modern industrial: Flat roof with mechanical details
-            return f"""
-    union() {{
-        // Main structure
-        linear_extrude(height={height}, convexity=2)
-            polygon([{points_str}]);
-        
-        // Roof details (mechanical equipment, etc.)
-        translate([0, 0, {height}]) {{
-            linear_extrude(height=1.2, convexity=2)
-                offset(r=-2)
-                    polygon([{points_str}]);
-        }}
-    }}"""
-        elif style == "classic":
-            # Classic industrial: Sawtooth roof pattern
-            return f"""
-    union() {{
-        // Main structure
-        linear_extrude(height={height * 0.8}, convexity=2)
-            polygon([{points_str}]);
-        
-        // Sawtooth roof
-        translate([0, 0, {height * 0.8}])
-            linear_extrude(height={height * 0.2}, convexity=2)
-                offset(r=-1)
-                    polygon([{points_str}]);
-    }}"""
-        else:  # minimal
-            # Minimal industrial: Simple block with slight roof detail
-            return f"""
-    union() {{
-        // Main structure
-        linear_extrude(height={height}, convexity=2)
-            polygon([{points_str}]);
-        
-        // Simple roof edge
-        translate([0, 0, {height - 0.5}])
-            linear_extrude(height=0.5, convexity=2)
-                offset(r=-0.5)
-                    polygon([{points_str}]);
-    }}"""
 
     def _generate_water_features(self, water_features, layer_specs):
         """Generate OpenSCAD code for water features (subtractive)"""
@@ -1733,21 +1724,22 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for roads (subtractive)"""
+        """Generate OpenSCAD code for road features (subtractive)"""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
         road_width = layer_specs["roads"]["width"]
+        park_offset = layer_specs["parks"].get("start_offset", 0.2)
+        park_thickness = layer_specs["parks"].get("thickness", 0.4)
+        road_extrude_height = road_depth + park_offset + park_thickness + 0.1
 
         for i, road in enumerate(road_features):
             coords = road.get("coords", [])
             is_parking = road.get("is_parking", False)
 
             if is_parking and len(coords) >= 3:
-                # Parking lot as polygon
                 points_str = self.geometry.generate_polygon_points(coords)
             else:
-                # Road as buffered line
                 points_str = None
                 if len(coords) >= 2:
                     points_str = self.geometry.generate_buffered_polygon(
@@ -1758,13 +1750,13 @@ difference() {{
                 color_val = "yellow" if is_parking else "black"
                 scad.append(
                     f"""
-        // {"Parking Area" if is_parking else "Road"} {i+1}
-        translate([0, 0, {base_height - road_depth}])
-            color("{color_val}")
-            {{
-                linear_extrude(height={road_depth + 0.1}, convexity=2)
-                    polygon([{points_str}]);
-            }}"""
+            // {"Parking Area" if is_parking else "Road"} {i+1}
+            translate([0, 0, {base_height - road_depth}])
+                color("{color_val}")
+                {{
+                    linear_extrude(height={road_extrude_height}, convexity=2)
+                        polygon([{points_str}]);
+                }}"""
                 )
 
         return "\n".join(scad)
@@ -1800,9 +1792,9 @@ difference() {{
         """Generate OpenSCAD code for bridges with improved 3D printing support"""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = 2.0  # Height above base
-        bridge_thickness = 1  # Thickness for stability
-        support_width = 2.0  # Width of bridge supports
+        bridge_height = layer_specs["bridges"]["height"]
+        bridge_thickness = layer_specs["bridges"]["thickness"]
+        support_width = layer_specs["bridges"]["support_width"]
         road_width = layer_specs["roads"]["width"]
 
         for i, bridge in enumerate(bridge_features):
@@ -1815,7 +1807,6 @@ difference() {{
                 start_point = coords[0]
                 end_point = coords[-1]
 
-                # Using red color for unspecified features (bridges)
                 scad.append(
                     f"""
         // Bridge {i+1}
@@ -1843,10 +1834,12 @@ difference() {{
         base_height = layer_specs["base"]["height"]
         park_offset = layer_specs["parks"].get("start_offset", 0.2)
         park_thickness = layer_specs["parks"].get("thickness", 0.4)
+
         for i, park in enumerate(park_features):
             points_str = self.geometry.generate_polygon_points(park["coords"])
             if not points_str:
                 continue
+                
             scad.append(f"""
         // Park {i+1}
         translate([0, 0, {base_height + park_offset}]) {{
@@ -1854,8 +1847,8 @@ difference() {{
             linear_extrude(height={park_thickness}, convexity=2)
                 polygon([{points_str}]);
         }}""")
+            
         return "\n".join(scad)
-
 ```
 
 # lib/style_manager.py
@@ -2183,179 +2176,421 @@ class ArtisticEffects:
 # lib/style/block_combiner.py
 
 ```py
-# lib/style/block_combiner.py
-
 import random
 from shapely.geometry import Polygon, MultiPolygon, box, LineString
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 from ..geometry import GeometryUtils
 
-
 class BlockCombiner:
+    """
+    A refined block combiner that creates clean, printable 3D building blocks with:
+    - Clear separation between blocks based on roads/water
+    - Proper handling of industrial vs residential areas
+    - Clean, non-overlapping roof structures
+    - Building heights that make sense within blocks
+    """
+
     def __init__(self, style_manager):
         self.style_manager = style_manager
         self.geometry = GeometryUtils()
-        self.debug = False
+        self.debug = False  # Enable/disable debug prints
+
+        # Define block types and their characteristics
+        self.BLOCK_TYPES = {
+            'residential': {
+                'min_height': 10.0,
+                'max_height': 25.0,
+                'roof_styles': [
+                    {'name': 'pitched', 'height_factor': 0.3},
+                    {'name': 'tiered', 'levels': 2},
+                    {'name': 'flat', 'border': 1.0}
+                ]
+            },
+            'industrial': {
+                'min_height': 15.0,
+                'max_height': 35.0,
+                'roof_styles': [
+                    {'name': 'sawtooth', 'angle': 30},
+                    {'name': 'flat', 'border': 2.0},
+                    {'name': 'stepped', 'levels': 3}
+                ]
+            },
+            'commercial': {
+                'min_height': 20.0,
+                'max_height': 40.0,
+                'roof_styles': [
+                    {'name': 'modern', 'setback': 2.0},
+                    {'name': 'tiered', 'levels': 3},
+                    {'name': 'complex', 'variations': 4}
+                ]
+            }
+        }
 
     def combine_buildings_by_block(self, features):
         """
-        Fill each block that has any building coverage. For each block:
-          1) Compute a block-wide height based on the largest building in that block.
-          2) Slightly randomize the final height to avoid uniform extrusions.
-          3) Randomly pick a 'roof_style' so block roofs vary (flat, sawtooth, etc.).
+        Main entry point that:
+          1) Gathers all building footprints,
+          2) Creates barrier geometry,
+          3) Divides the map into blocks,
+          4) Finds which footprints fall into each block,
+          5) Processes them into final building shapes.
         """
         if self.debug:
-            print("\nStarting block combination process...")
-            print(f"Number of input buildings: {len(features.get('buildings', []))}")
+            print("\n=== Block Combiner Debug ===")
 
-        # 1) Create blocks from road network
-        blocks = self._create_blocks_from_roads(features.get("roads", []))
+        # 1. Gather footprints (buildings + industrial)
+        building_footprints = self._gather_all_footprints(features)
         if self.debug:
-            print(f"Created {len(blocks)} blocks from road network")
+            print(f"Found {len(building_footprints)} building footprints.")
 
-        # 2) Gather building polygons (no minimum area filter here)
-        building_polygons = []
-        for building in features.get("buildings", []):
-            try:
-                poly = Polygon(building["coords"])
-                height = building.get("height", 5.0)  # Default if missing
-                if poly.is_valid:
-                    building_polygons.append((poly, height))
-                else:
-                    fixed_poly = make_valid(poly)
-                    if isinstance(fixed_poly, MultiPolygon):
-                        for p in fixed_poly.geoms:
-                            if p.is_valid:
-                                building_polygons.append((p, height))
-                    elif fixed_poly.is_valid:
-                        building_polygons.append((fixed_poly, height))
-            except Exception as e:
-                if self.debug:
-                    print(f"Error processing building: {e}")
-                continue
+        # 2. Create barrier geometry from roads/water
+        barrier_union = self._create_barrier_union(features)
 
+        # 3. Generate blocks by subtracting barriers from bounding area
+        blocks = self._create_blocks_from_barriers(barrier_union)
         if self.debug:
-            print(f"Processed {len(building_polygons)} valid building polygons")
+            print(f"Generated {len(blocks)} blocks from barrier union.")
 
-        # 3) Create a union of all buildings for intersection checks
-        if building_polygons:
-            all_buildings = unary_union([poly for (poly, _) in building_polygons])
-            if not all_buildings.is_valid:
-                all_buildings = make_valid(all_buildings)
-        else:
-            all_buildings = None
-
+        # 4 & 5. For each block, find footprints, analyze, and process
         combined_buildings = []
-        default_height = 5.0
+        for block in blocks:
+            block_buildings = self._find_buildings_in_block(block, building_footprints)
+            block_info = self._analyze_block(block_buildings)
+            processed_shapes = self._process_block_buildings(
+                block, block_buildings, block_info, barrier_union
+            )
+            combined_buildings.extend(processed_shapes)
 
-        # 4) Process each block
-        for block_idx, block_geom in enumerate(blocks):
-            try:
-                # If there are no buildings at all, or block doesn't intersect them, skip
-                if not all_buildings or not block_geom.intersects(all_buildings):
-                    continue
-
-                # Find the largest building (by intersection area) that touches this block
-                block_heights = []
-                for (building_poly, bldg_height) in building_polygons:
-                    if block_geom.intersects(building_poly):
-                        intersection = block_geom.intersection(building_poly)
-                        if intersection.area > 0:
-                            block_heights.append((bldg_height, intersection.area))
-
-                # If at least one building intersects, pick the largest intersection’s height
-                if block_heights:
-                    block_height = max(block_heights, key=lambda x: x[1])[0]
-                else:
-                    block_height = default_height
-
-                # [Add a slight buffer shrink, so roads remain visible]
-                block_shape = block_geom.buffer(-0.1)
-                if not block_shape.is_valid:
-                    block_shape = make_valid(block_shape)
-
-                if block_shape.is_valid and not block_shape.is_empty:
-                    coords = list(block_shape.exterior.coords)[:-1]
-
-                    # -----------------------------------------
-                    # [ADDED RANDOMIZATION SECTION]
-                    # Slight random factor for final block height
-                    rand_factor = random.uniform(0.85, 1.15)
-                    final_height = block_height * rand_factor
-
-                    # Randomly pick a style for the block's roof
-                    roof_style = random.choice(["flat", "sawtooth", "modern", "step"])
-                    # -----------------------------------------
-
-                    combined_buildings.append({
-                        "coords": coords,
-                        "height": final_height,
-                        "roof_style": roof_style,  # stored for SCAD generator
-                        "is_block": True
-                    })
-
-                    if self.debug:
-                        print(f"Block {block_idx} height ~ {final_height:.2f}, style={roof_style}")
-
-            except Exception as e:
-                if self.debug:
-                    print(f"Error processing block {block_idx}: {e}")
-                continue
-
-        if self.debug:
-            print(f"\nFinal combined buildings count: {len(combined_buildings)}")
+        # Optionally, you could also handle footprints not in any block.
+        # For example, if some footprints fall outside the barrier bounding box.
+        # That step is omitted here, but you can add it if needed.
 
         return combined_buildings
 
-    def _create_blocks_from_roads(self, roads):
+    def _gather_all_footprints(self, features):
         """
-        Use the road network to produce 'blocks' as polygons. We take each road,
-        buffer it by half its width, then subtract from the bounding area to get blocks.
+        Collect all building/industrial footprints into a unified list.
+        This is the SINGLE version (the old duplicate method was removed).
         """
+        footprints = []
+
+        # Process "normal" building features
+        for bldg in features.get('buildings', []):
+            coords = bldg.get('coords')
+            if not coords or len(coords) < 3:
+                continue
+
+            # Check building type from props if available
+            props = bldg.get('properties', {})
+            bldg_type = 'residential'  # default
+            if props.get('building') in ['commercial', 'retail', 'office']:
+                bldg_type = 'commercial'
+            elif props.get('building') in ['industrial', 'warehouse', 'factory']:
+                bldg_type = 'industrial'
+
+            poly = Polygon(coords)
+            if not poly.is_valid:
+                poly = make_valid(poly)
+            if poly.is_valid and not poly.is_empty:
+                footprints.append({
+                    'polygon': poly,
+                    'type': bldg_type,
+                    'height': bldg.get('height', 10.0),
+                    'original': bldg
+                })
+
+        # Process industrial features (both buildings and landuse areas)
+        for ind in features.get('industrial', []):
+            coords = ind.get('coords')
+            if not coords or len(coords) < 3:
+                continue
+
+            poly = Polygon(coords)
+            if not poly.is_valid:
+                poly = make_valid(poly)
+            if poly.is_empty or not poly.is_valid:
+                continue
+
+            # If it's a big industrial area, we can subdivide or treat as one footprint
+            if ind.get('landuse_type'):
+                # For large industrial landuse, optionally subdivide
+                # (You can keep it simpler if you prefer)
+                area = poly.area
+                if area > 1000:
+                    # Buffer inward to create multiple smaller building footprints
+                    buffered = poly.buffer(-2.0)
+                    if buffered.is_valid and not buffered.is_empty:
+                        footprints.append({
+                            'polygon': buffered,
+                            'type': 'industrial',
+                            'height': ind.get('height', 15.0),
+                            'original': ind
+                        })
+                else:
+                    # Single building
+                    footprints.append({
+                        'polygon': poly,
+                        'type': 'industrial',
+                        'height': ind.get('height', 15.0),
+                        'original': ind
+                    })
+            else:
+                # It's an industrial building
+                footprints.append({
+                    'polygon': poly,
+                    'type': 'industrial',
+                    'height': ind.get('height', 15.0),
+                    'original': ind
+                })
+
+        return footprints
+
+    def _create_barrier_union(self, features):
+        """
+        Create a unified geometry of all barriers (roads, water, etc.).
+        The result is used to subdivide the bounding box into 'blocks'.
+        """
+        barriers = []
+
+        # Road buffer
+        road_width = self.style_manager.get_default_layer_specs()["roads"]["width"]
+        for road in features.get('roads', []):
+            try:
+                line = LineString(road["coords"])
+                # Buffer roads by ~60% of the width to create a barrier
+                buffered = line.buffer(road_width * 0.6)
+                if buffered.is_valid and not buffered.is_empty:
+                    barriers.append(buffered)
+            except Exception:
+                continue
+
+        # Water buffer
+        for water in features.get('water', []):
+            try:
+                poly = Polygon(water["coords"])
+                if poly.is_valid and not poly.is_empty:
+                    # Give water a 1.5m buffer for the barrier
+                    barriers.append(poly.buffer(1.5))
+            except Exception:
+                continue
+
+        if not barriers:
+            return None
+
+        unioned = unary_union(barriers)
+        if not unioned.is_valid:
+            unioned = make_valid(unioned)
+        return unioned
+
+    def _create_blocks_from_barriers(self, barrier_union):
+        """
+        Subtract the barrier geometry from its bounding box to get
+        'blocks' (MultiPolygon) that remain between roads, water, etc.
+        """
+        if not barrier_union or barrier_union.is_empty:
+            return []
+
         try:
-            road_polys = []
-            road_width = self.style_manager.get_default_layer_specs()["roads"]["width"]
+            # Create bounding box around all barrier geometry
+            minx, miny, maxx, maxy = barrier_union.bounds
+            bounding_area = box(minx, miny, maxx, maxy)
 
-            for road in roads:
-                try:
-                    line = LineString(road["coords"])
-                    # Buffer by half the road width
-                    buffered = line.buffer(road_width * 0.5)
-                    if buffered.is_valid:
-                        road_polys.append(buffered)
-                except Exception as e:
-                    if self.debug:
-                        print(f"Error processing road: {e}")
-                    continue
-
-            if not road_polys:
-                return []
-
-            road_union = unary_union(road_polys)
-            if not road_union.is_valid:
-                road_union = make_valid(road_union)
-
-            # bounding rectangle for union
-            minx, miny, maxx, maxy = road_union.bounds
-            area = box(minx, miny, maxx, maxy)
-
-            blocks_area = area.difference(road_union)
-
-            # May be multiple polygons if the bounding area was large
+            # Subtract barriers to form blocks
+            blocks_area = bounding_area.difference(barrier_union)
             if blocks_area.is_empty:
                 return []
-            elif isinstance(blocks_area, MultiPolygon):
-                blocks = [poly for poly in blocks_area.geoms if poly.is_valid]
+
+            # If we get multiple polygons, handle them all
+            if isinstance(blocks_area, MultiPolygon):
+                blocks = []
+                for b in blocks_area.geoms:
+                    if b.area > 100:  # skip very tiny
+                        simplified = b.simplify(0.5)
+                        if simplified.is_valid and not simplified.is_empty:
+                            blocks.append(simplified)
+                return blocks
             else:
-                blocks = [blocks_area] if blocks_area.is_valid else []
-
-            return blocks
-
+                # Single polygon result
+                if blocks_area.area > 100:
+                    simplified = blocks_area.simplify(0.5)
+                    if simplified.is_valid and not simplified.is_empty:
+                        return [simplified]
+            return []
         except Exception as e:
             if self.debug:
-                print(f"Error creating blocks from roads: {e}")
+                print(f"Error creating blocks: {e}")
             return []
+
+    def _find_buildings_in_block(self, block, building_footprints):
+        """
+        Find all building footprints that intersect a given block polygon.
+        """
+        block_buildings = []
+        for fp in building_footprints:
+            try:
+                shape = fp['polygon']
+                if block.intersects(shape):
+                    intersection = block.intersection(shape)
+                    if not intersection.is_empty and intersection.area > 10:
+                        # Copy footprint and store the clipped geometry
+                        fp_copy = dict(fp)
+                        fp_copy['polygon'] = intersection
+                        block_buildings.append(fp_copy)
+            except Exception:
+                continue
+        return block_buildings
+
+    def _analyze_block(self, block_buildings):
+        """
+        Inspect the buildings in this block to figure out a suitable block type
+        or average height. You can adapt this logic to your needs.
+        """
+        if not block_buildings:
+            return {'type': 'residential', 'avg_height': 15.0}
+
+        # Tally up building types & compute weighted average height
+        type_counts = {'residential': 0, 'industrial': 0, 'commercial': 0}
+        total_area = 0.0
+        weighted_height = 0.0
+
+        for b in block_buildings:
+            area = b['polygon'].area
+            total_area += area
+            weighted_height += b['height'] * area
+            if b['type'] in type_counts:
+                type_counts[b['type']] += 1
+            else:
+                type_counts['residential'] += 1  # fallback
+
+        # The dominant type is the block type
+        block_type = max(type_counts, key=type_counts.get)
+        avg_height = weighted_height / total_area if total_area > 0 else 15.0
+
+        return {
+            'type': block_type,
+            'avg_height': avg_height,
+            'building_count': len(block_buildings),
+            'total_area': total_area
+        }
+
+    def _process_block_buildings(self, block, block_buildings, block_info, barrier_union):
+        """
+        Convert all footprints in this block into final 3D shapes,
+        applying style rules, merging footprints, etc.
+        """
+        if not block_buildings:
+            return []
+
+        processed = []
+        block_type = block_info['type']
+        type_specs = self.BLOCK_TYPES.get(block_type, self.BLOCK_TYPES['residential'])
+
+        # Union all footprints in this block
+        try:
+            footprints_union = unary_union([b['polygon'] for b in block_buildings])
+            if not footprints_union.is_valid:
+                footprints_union = make_valid(footprints_union)
+        except Exception:
+            return []
+
+        # Possibly break a MultiPolygon into individual polygons
+        polygons = []
+        if isinstance(footprints_union, MultiPolygon):
+            polygons.extend(footprints_union.geoms)
+        else:
+            polygons.append(footprints_union)
+
+        for shape in polygons:
+            if shape.is_empty or shape.area < 50:
+                continue
+
+            # Simplify & buffer inward a bit if you like
+            cleaned = shape.simplify(0.5)
+            if not cleaned.is_valid or cleaned.is_empty:
+                continue
+
+            # Optionally buffer inward to avoid collisions
+            # (reduces the polygon edges slightly)
+            final_poly = cleaned.buffer(-0.3)
+            if final_poly.is_empty:
+                continue
+
+            # Respect barrier lines inside the block
+            if barrier_union:
+                clipped = final_poly.difference(barrier_union)
+                if clipped.is_empty:
+                    continue
+            else:
+                clipped = final_poly
+
+            # At this point, 'clipped' is our final footprint
+            if clipped.is_empty or clipped.area < 10:
+                continue
+
+            # Convert to single polygons if it's still a MultiPolygon
+            if isinstance(clipped, MultiPolygon):
+                sub_polys = list(clipped.geoms)
+            else:
+                sub_polys = [clipped]
+
+            for spoly in sub_polys:
+                if spoly.is_empty or spoly.area < 10:
+                    continue
+
+                # Determine final building height
+                base_height = self._calculate_building_height(block_info['avg_height'], type_specs)
+                roof_style = self._select_roof_style(block_type)
+
+                building_dict = {
+                    'coords': list(spoly.exterior.coords)[:-1],
+                    'height': base_height,
+                    'block_type': block_type,
+                    'roof_style': roof_style['name'],
+                    'roof_params': roof_style
+                }
+                processed.append(building_dict)
+
+        return processed
+
+    def _calculate_building_height(self, avg_height, type_specs):
+        """
+        Pick a final building height that respects the block's average
+        but also the block-type constraints.
+        """
+        min_h = type_specs['min_height']
+        max_h = type_specs['max_height']
+
+        # Start around the block's average
+        base = max(avg_height, min_h)
+        if base < 15.0:
+            base = 15.0
+
+        # Add a little random variation (+/- 15%)
+        variation = random.uniform(0.85, 1.15)
+        candidate = base * variation
+
+        # Clamp to [min_h, max_h]
+        final_height = max(min_h, min(candidate, max_h))
+        return final_height
+
+    def _select_roof_style(self, block_type):
+        """
+        Randomly pick a roof style from the block type's style list.
+        """
+        styles = self.BLOCK_TYPES.get(block_type, self.BLOCK_TYPES['residential'])['roof_styles']
+        choice = random.choice(styles)
+
+        # Add minor parameter variation
+        if choice['name'] == 'pitched':
+            choice['height_factor'] *= random.uniform(0.8, 1.2)
+        elif choice['name'] == 'tiered':
+            choice['levels'] = max(1, choice['levels'] + random.randint(-1, 1))
+        elif choice['name'] == 'flat':
+            choice['border'] *= random.uniform(0.9, 1.1)
+        # etc. for others
+
+        return choice
 
 ```
 
@@ -2481,6 +2716,206 @@ class BuildingMerger:
 
 ```
 
+# lib/style/generate_building.py
+
+```py
+class BuildingGenerator:
+    """
+    Generates OpenSCAD code for buildings with clean, non-overlapping roofs
+    that respect block boundaries and barriers.
+    """
+    
+    def __init__(self, style_manager):
+        self.style_manager = style_manager
+
+    def generate_building_details(self, points_str, height, roof_style=None, roof_params=None, block_type=None):
+        """Generate a building with appropriate roof style."""
+        if not roof_style or not roof_params:
+            return self._generate_basic_building(points_str, height)
+
+        if roof_style == 'pitched':
+            return self._generate_pitched_roof(points_str, height, roof_params)
+        elif roof_style == 'tiered':
+            return self._generate_tiered_roof(points_str, height, roof_params)
+        elif roof_style == 'flat':
+            return self._generate_flat_roof(points_str, height, roof_params)
+        elif roof_style == 'sawtooth':
+            return self._generate_sawtooth_roof(points_str, height, roof_params)
+        elif roof_style == 'modern':
+            return self._generate_modern_roof(points_str, height, roof_params)
+        elif roof_style == 'complex':
+            return self._generate_complex_roof(points_str, height, roof_params)
+        elif roof_style == 'stepped':
+            return self._generate_stepped_roof(points_str, height, roof_params)
+        else:
+            return self._generate_basic_building(points_str, height)
+
+    def _generate_basic_building(self, points_str, height):
+        """Generate a basic building without roof details."""
+        return f"""
+            linear_extrude(height={height}, convexity=2)
+                polygon([{points_str}]);"""
+
+    def _generate_pitched_roof(self, points_str, height, params):
+        """Generate a pitched roof building."""
+        roof_height = height * params['height_factor']
+        base_height = height - roof_height
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                
+                // Pitched roof
+                translate([0, 0, {base_height}])
+                    linear_extrude(height={roof_height}, scale=0.6, convexity=2)
+                        polygon([{points_str}]);
+            }}"""
+
+    def _generate_tiered_roof(self, points_str, height, params):
+        """Generate a tiered roof with multiple levels."""
+        num_levels = params['levels']
+        level_height = height * 0.15  # Each tier is 15% of total height
+        base_height = height - (level_height * num_levels)
+        
+        tiers = []
+        for i in range(num_levels):
+            offset = (i + 1) * 1.5  # Increasing inset for each tier
+            tier_start = base_height + (i * level_height)
+            tiers.append(f"""
+                // Tier {i + 1}
+                translate([0, 0, {tier_start}])
+                    linear_extrude(height={level_height}, convexity=2)
+                        offset(r=-{offset})
+                            polygon([{points_str}]);""")
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                {' '.join(tiers)}
+            }}"""
+
+    def _generate_flat_roof(self, points_str, height, params):
+        """Generate a flat roof with border detail."""
+        border = params['border']
+        return f"""
+            union() {{
+                // Main building
+                linear_extrude(height={height}, convexity=2)
+                    polygon([{points_str}]);
+                
+                // Roof border
+                translate([0, 0, {height}])
+                    linear_extrude(height=1.0, convexity=2)
+                        difference() {{
+                            polygon([{points_str}]);
+                            offset(r=-{border})
+                                polygon([{points_str}]);
+                        }}
+            }}"""
+
+    def _generate_sawtooth_roof(self, points_str, height, params):
+        """Generate an industrial sawtooth roof."""
+        angle = params['angle']
+        tooth_height = height * 0.2
+        base_height = height - tooth_height
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                
+                // Sawtooth roof
+                translate([0, 0, {base_height}]) {{
+                    intersection() {{
+                        linear_extrude(height={tooth_height}, convexity=2)
+                            polygon([{points_str}]);
+                        
+                        // Sawtooth pattern
+                        rotate([{angle}, 0, 0])
+                            translate([0, 0, -50])
+                                linear_extrude(height=100, convexity=4)
+                                    polygon([{points_str}]);
+                    }}
+                }}
+            }}"""
+
+    def _generate_modern_roof(self, points_str, height, params):
+        """Generate a modern style roof with setback."""
+        setback = params['setback']
+        top_height = height * 0.2
+        base_height = height - top_height
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                
+                // Setback top section
+                translate([0, 0, {base_height}])
+                    linear_extrude(height={top_height}, convexity=2)
+                        offset(r=-{setback})
+                            polygon([{points_str}]);
+            }}"""
+
+    def _generate_complex_roof(self, points_str, height, params):
+        """Generate a complex roof with multiple variations."""
+        variations = params['variations']
+        section_height = height * 0.15
+        base_height = height - (section_height * variations)
+        
+        sections = []
+        for i in range(variations):
+            offset = 1.0 + (i * 0.8)  # Progressive offset
+            section_start = base_height + (i * section_height)
+            scale = 1.0 - (i * 0.15)  # Progressive scale reduction
+            
+            sections.append(f"""
+                // Complex section {i + 1}
+                translate([0, 0, {section_start}])
+                    linear_extrude(height={section_height}, scale={scale}, convexity=2)
+                        offset(r=-{offset})
+                            polygon([{points_str}]);""")
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                {' '.join(sections)}
+            }}"""
+
+    def _generate_stepped_roof(self, points_str, height, params):
+        """Generate a stepped industrial roof."""
+        num_levels = params['levels']
+        step_height = height * 0.12
+        base_height = height - (step_height * num_levels)
+        
+        steps = []
+        for i in range(num_levels):
+            offset = 2.0 + (i * 1.5)  # Increasing step size
+            step_start = base_height + (i * step_height)
+            steps.append(f"""
+                // Step {i + 1}
+                translate([0, 0, {step_start}])
+                    linear_extrude(height={step_height}, convexity=2)
+                        offset(r=-{offset})
+                            polygon([{points_str}]);""")
+        
+        return f"""
+            union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2)
+                    polygon([{points_str}]);
+                {' '.join(steps)}
+            }}"""
+```
+
 # lib/style/height_manager.py
 
 ```py
@@ -2538,6 +2973,7 @@ class HeightManager:
 from .building_merger import BuildingMerger
 from .height_manager import HeightManager
 from .artistic_effects import ArtisticEffects
+from .block_combiner import BlockCombiner
 
 
 class StyleManager:
@@ -2560,20 +2996,21 @@ class StyleManager:
         self.building_merger = BuildingMerger(self)
         self.height_manager = HeightManager(self)
         self.artistic_effects = ArtisticEffects(self)
+        self.block_combiner = BlockCombiner(self)
         self.current_features = {}
 
     def get_default_layer_specs(self):
         """Get default layer specifications."""
         return {
-            "water": {"depth": 3},
-            "roads": {"depth": 0.4, "width": 2.0},
+            "water": {"depth": 2.4},
+            "roads": {"depth": 0.4, "width": 1.0},
             "railways": {"depth": 0.6, "width": 1.5},
             "parks": {
                 "start_offset": 0.2,  # top of base + 0.2
                 "thickness": 0.4
             },
-            "buildings": {"min_height": 2, "max_height": 6},
-            "base": {"height": 10},
+            "buildings": {"min_height": 2, "max_height": 8},
+            "base": {"height": 3},
         }
 
     def scale_building_height(self, properties):
@@ -2581,8 +3018,13 @@ class StyleManager:
         return self.height_manager.scale_height(properties)
 
     def merge_nearby_buildings(self, buildings, barrier_union=None):
-        """Merge buildings using BuildingMerger."""
-        return self.building_merger.merge_buildings(buildings, barrier_union)
+        """Choose merging strategy based on style."""
+        if self.style["artistic_style"] == "block-combine":
+            # This calls our new block combiner code
+            return self.block_combiner.combine_buildings_by_block(self.current_features)
+        else:
+            # Original distance-based approach
+            return self.building_merger.merge_buildings(buildings, barrier_union)
 
     def set_current_features(self, features):
         """Store current features."""
@@ -3239,7 +3681,6 @@ app.listen(port, () => {
   <title>Shadow City Generator Frontend</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
-  <!-- Include jQuery for convenience -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <style>
     .preview-container {
@@ -3257,25 +3698,26 @@ app.listen(port, () => {
       margin-bottom: 5px;
     }
 
-    /* ADDED FOR LIVE LOG */
     .log-container {
       margin-top: 20px;
     }
 
     #liveLog {
       background-color: #1e1e1e;
-      /* Dark background */
       color: #cfcfcf;
-      /* Lighter text */
       padding: 10px;
       border-radius: 5px;
       min-height: 100px;
-      /* Some minimum height */
       max-height: 300px;
-      /* Scroll if longer than 300px */
       overflow-y: auto;
       font-family: monospace;
       white-space: pre;
+    }
+
+    .processing-indicator {
+      display: none;
+      color: #007bff;
+      margin-bottom: 10px;
     }
   </style>
 </head>
@@ -3298,6 +3740,7 @@ app.listen(port, () => {
             <label for="geojson">GeoJSON File</label>
             <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
           </div>
+
           <!-- Preprocessing Options -->
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Preprocessing Options</legend>
@@ -3377,7 +3820,6 @@ app.listen(port, () => {
             </div>
           </fieldset>
 
-
           <!-- Bridge Options -->
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Bridge Options</legend>
@@ -3432,7 +3874,7 @@ app.listen(port, () => {
               <div class="form-row">
                 <div class="col">
                   <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
-                    value="1920">
+                    value="1080">
                 </div>
                 <div class="col">
                   <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
@@ -3463,16 +3905,20 @@ app.listen(port, () => {
 
       <!-- Right Column: Live Previews and Downloadable Files -->
       <div class="col-md-8">
+        <div class="processing-indicator">
+          Processing changes... Preview will update in 2 seconds.
+        </div>
+
         <div class="preview-container">
           <h3>Live Preview - Main Model</h3>
           <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
         </div>
+
         <div class="preview-container">
           <h3>Live Preview - Frame Model</h3>
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
 
-        <!-- ADDED FOR LIVE LOG -->
         <div class="log-container">
           <h4>Live Log</h4>
           <div id="liveLog"></div>
@@ -3485,10 +3931,28 @@ app.listen(port, () => {
           </div>
         </div>
       </div>
-    </div> <!-- end row -->
-  </div> <!-- end container -->
+    </div>
+  </div>
 
   <script>
+    // Debounce function to limit how often a function can be called
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        // Show processing indicator
+        $(".processing-indicator").show();
+
+        const later = () => {
+          clearTimeout(timeout);
+          $(".processing-indicator").hide();
+          func(...args);
+        };
+
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
     // Function to update the live preview images
     function updatePreview() {
       var uploadedFile = $("#uploadedFile").val();
@@ -3496,7 +3960,9 @@ app.listen(port, () => {
         console.log("No file uploaded yet.");
         return;
       }
-      // Gather all form data
+
+      $("#liveLog").text("Generating preview...");
+
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
 
@@ -3505,13 +3971,11 @@ app.listen(port, () => {
         type: "POST",
         data: formData,
         success: function (data) {
-          // Update preview images if available
           if (data.previewMain && data.previewFrame) {
-            $("#previewMain").attr("src", data.previewMain).show();
-            $("#previewFrame").attr("src", data.previewFrame).show();
+            $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
+            $("#previewFrame").attr("src", data.previewFrame + "?t=" + new Date().getTime()).show();
           }
 
-          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
           var logText = "";
           if (data.stdout) {
             logText += data.stdout + "\n";
@@ -3530,7 +3994,10 @@ app.listen(port, () => {
       });
     }
 
-    // Upload GeoJSON file via AJAX when the file input changes
+    // Create debounced version of updatePreview with 2 second delay
+    const debouncedUpdatePreview = debounce(updatePreview, 2000);
+
+    // Handle file upload
     $("#geojson").on("change", function () {
       var fileInput = document.getElementById("geojson");
       if (fileInput.files.length === 0) return;
@@ -3547,7 +4014,7 @@ app.listen(port, () => {
         success: function (data) {
           if (data.filePath) {
             $("#uploadedFile").val(data.filePath);
-            updatePreview();
+            debouncedUpdatePreview();
           }
         },
         error: function (err) {
@@ -3559,7 +4026,7 @@ app.listen(port, () => {
 
     // Update live preview when any option changes
     $(".live-preview").on("change keyup", function () {
-      updatePreview();
+      debouncedUpdatePreview();
     });
 
     // Handle final render button click
@@ -3569,7 +4036,8 @@ app.listen(port, () => {
         alert("Please upload a GeoJSON file first.");
         return;
       }
-      // Gather form data for final render
+
+      $("#liveLog").text("Generating final render...");
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
 
@@ -3578,10 +4046,8 @@ app.listen(port, () => {
         type: "POST",
         data: formData,
         success: function (data) {
-          // Insert downloadable file links in the downloadLinks div
           var linksHtml = "";
 
-          // SCAD downloads
           if (data.mainScad) {
             linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a><br>';
           }
@@ -3589,7 +4055,6 @@ app.listen(port, () => {
             linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
           }
 
-          // STL downloads
           if (data.stlFiles && data.stlFiles.mainStl) {
             linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
           }
@@ -3597,14 +4062,12 @@ app.listen(port, () => {
             linksHtml += '<a href="' + data.stlFiles.frameStl + '" download>Frame Model (STL)</a><br>';
           }
 
-          // Debug log
           if (data.logFile) {
             linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a><br>';
           }
 
           $("#downloadLinks").html(linksHtml);
 
-          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
           var logText = "";
           if (data.stdout) {
             logText += data.stdout + "\n";

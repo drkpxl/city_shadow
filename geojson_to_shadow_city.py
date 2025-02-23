@@ -132,7 +132,7 @@ def main():
         type=int,
         nargs=2,
         metavar=("WIDTH", "HEIGHT"),
-        default=[1920, 1080],
+        default=[1080, 1080],
         help="Preview image size in pixels",
     )
     preview_group.add_argument(

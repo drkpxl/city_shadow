@@ -6,7 +6,6 @@
   <title>Shadow City Generator Frontend</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
-  <!-- Include jQuery for convenience -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <style>
     .preview-container {
@@ -24,25 +23,26 @@
       margin-bottom: 5px;
     }
 
-    /* ADDED FOR LIVE LOG */
     .log-container {
       margin-top: 20px;
     }
 
     #liveLog {
       background-color: #1e1e1e;
-      /* Dark background */
       color: #cfcfcf;
-      /* Lighter text */
       padding: 10px;
       border-radius: 5px;
       min-height: 100px;
-      /* Some minimum height */
       max-height: 300px;
-      /* Scroll if longer than 300px */
       overflow-y: auto;
       font-family: monospace;
       white-space: pre;
+    }
+
+    .processing-indicator {
+      display: none;
+      color: #007bff;
+      margin-bottom: 10px;
     }
   </style>
 </head>
@@ -65,6 +65,7 @@
             <label for="geojson">GeoJSON File</label>
             <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
           </div>
+
           <!-- Preprocessing Options -->
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Preprocessing Options</legend>
@@ -144,7 +145,6 @@
             </div>
           </fieldset>
 
-
           <!-- Bridge Options -->
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Bridge Options</legend>
@@ -199,7 +199,7 @@
               <div class="form-row">
                 <div class="col">
                   <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
-                    value="1920">
+                    value="1080">
                 </div>
                 <div class="col">
                   <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
@@ -230,16 +230,20 @@
 
       <!-- Right Column: Live Previews and Downloadable Files -->
       <div class="col-md-8">
+        <div class="processing-indicator">
+          Processing changes... Preview will update in 2 seconds.
+        </div>
+
         <div class="preview-container">
           <h3>Live Preview - Main Model</h3>
           <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
         </div>
+
         <div class="preview-container">
           <h3>Live Preview - Frame Model</h3>
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
 
-        <!-- ADDED FOR LIVE LOG -->
         <div class="log-container">
           <h4>Live Log</h4>
           <div id="liveLog"></div>
@@ -252,10 +256,28 @@
           </div>
         </div>
       </div>
-    </div> <!-- end row -->
-  </div> <!-- end container -->
+    </div>
+  </div>
 
   <script>
+    // Debounce function to limit how often a function can be called
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        // Show processing indicator
+        $(".processing-indicator").show();
+
+        const later = () => {
+          clearTimeout(timeout);
+          $(".processing-indicator").hide();
+          func(...args);
+        };
+
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
     // Function to update the live preview images
     function updatePreview() {
       var uploadedFile = $("#uploadedFile").val();
@@ -263,7 +285,9 @@
         console.log("No file uploaded yet.");
         return;
       }
-      // Gather all form data
+
+      $("#liveLog").text("Generating preview...");
+
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
 
@@ -272,13 +296,11 @@
         type: "POST",
         data: formData,
         success: function (data) {
-          // Update preview images if available
           if (data.previewMain && data.previewFrame) {
-            $("#previewMain").attr("src", data.previewMain).show();
-            $("#previewFrame").attr("src", data.previewFrame).show();
+            $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
+            $("#previewFrame").attr("src", data.previewFrame + "?t=" + new Date().getTime()).show();
           }
 
-          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
           var logText = "";
           if (data.stdout) {
             logText += data.stdout + "\n";
@@ -297,7 +319,10 @@
       });
     }
 
-    // Upload GeoJSON file via AJAX when the file input changes
+    // Create debounced version of updatePreview with 2 second delay
+    const debouncedUpdatePreview = debounce(updatePreview, 2000);
+
+    // Handle file upload
     $("#geojson").on("change", function () {
       var fileInput = document.getElementById("geojson");
       if (fileInput.files.length === 0) return;
@@ -314,7 +339,7 @@
         success: function (data) {
           if (data.filePath) {
             $("#uploadedFile").val(data.filePath);
-            updatePreview();
+            debouncedUpdatePreview();
           }
         },
         error: function (err) {
@@ -326,7 +351,7 @@
 
     // Update live preview when any option changes
     $(".live-preview").on("change keyup", function () {
-      updatePreview();
+      debouncedUpdatePreview();
     });
 
     // Handle final render button click
@@ -336,7 +361,8 @@
         alert("Please upload a GeoJSON file first.");
         return;
       }
-      // Gather form data for final render
+
+      $("#liveLog").text("Generating final render...");
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
 
@@ -345,10 +371,8 @@
         type: "POST",
         data: formData,
         success: function (data) {
-          // Insert downloadable file links in the downloadLinks div
           var linksHtml = "";
 
-          // SCAD downloads
           if (data.mainScad) {
             linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a><br>';
           }
@@ -356,7 +380,6 @@
             linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
           }
 
-          // STL downloads
           if (data.stlFiles && data.stlFiles.mainStl) {
             linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
           }
@@ -364,14 +387,12 @@
             linksHtml += '<a href="' + data.stlFiles.frameStl + '" download>Frame Model (STL)</a><br>';
           }
 
-          // Debug log
           if (data.logFile) {
             linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a><br>';
           }
 
           $("#downloadLinks").html(linksHtml);
 
-          // ADDED FOR LIVE LOG: Dump stdout/stderr to the log container
           var logText = "";
           if (data.stdout) {
             logText += data.stdout + "\n";
