@@ -20,7 +20,7 @@ class RoadProcessor(BaseProcessor):
             return
 
         # Bridge
-        if props.get("bridge") in ["yes", "true", "1"]:
+        if props.get("bridge") and props.get("bridge").lower() not in ["no", "false", "0"]:
             bridge_type = props.get("highway", "bridge")
             features["bridges"].append({"coords": transformed, "type": bridge_type})
             if self.debug:
