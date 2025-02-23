@@ -2262,17 +2262,16 @@ class BlockCombiner:
             )
             combined_buildings.extend(processed_shapes)
 
-        # Optionally, you could also handle footprints not in any block.
-        # For example, if some footprints fall outside the barrier bounding box.
-        # That step is omitted here, but you can add it if needed.
-
+        # If you have footprints outside the bounding box, handle them here if desired.
         return combined_buildings
 
     def _gather_all_footprints(self, features):
         """
         Collect all building/industrial footprints into a unified list.
-        This is the SINGLE version (the old duplicate method was removed).
         """
+        from shapely.geometry import Polygon
+        from shapely.validation import make_valid
+
         footprints = []
 
         # Process "normal" building features
@@ -2281,9 +2280,9 @@ class BlockCombiner:
             if not coords or len(coords) < 3:
                 continue
 
-            # Check building type from props if available
+            # Default building type
+            bldg_type = 'residential'
             props = bldg.get('properties', {})
-            bldg_type = 'residential'  # default
             if props.get('building') in ['commercial', 'retail', 'office']:
                 bldg_type = 'commercial'
             elif props.get('building') in ['industrial', 'warehouse', 'factory']:
@@ -2312,13 +2311,11 @@ class BlockCombiner:
             if poly.is_empty or not poly.is_valid:
                 continue
 
-            # If it's a big industrial area, we can subdivide or treat as one footprint
             if ind.get('landuse_type'):
-                # For large industrial landuse, optionally subdivide
-                # (You can keep it simpler if you prefer)
+                # If it's a large industrial area, optionally subdivide
                 area = poly.area
                 if area > 1000:
-                    # Buffer inward to create multiple smaller building footprints
+                    # Example: buffer inward to break it up
                     buffered = poly.buffer(-2.0)
                     if buffered.is_valid and not buffered.is_empty:
                         footprints.append({
@@ -2328,7 +2325,6 @@ class BlockCombiner:
                             'original': ind
                         })
                 else:
-                    # Single building
                     footprints.append({
                         'polygon': poly,
                         'type': 'industrial',
@@ -2351,6 +2347,8 @@ class BlockCombiner:
         Create a unified geometry of all barriers (roads, water, etc.).
         The result is used to subdivide the bounding box into 'blocks'.
         """
+        from shapely.ops import unary_union
+
         barriers = []
 
         # Road buffer
@@ -2401,22 +2399,23 @@ class BlockCombiner:
             if blocks_area.is_empty:
                 return []
 
-            # If we get multiple polygons, handle them all
+            # Gather final blocks
+            blocks = []
             if isinstance(blocks_area, MultiPolygon):
-                blocks = []
                 for b in blocks_area.geoms:
-                    if b.area > 100:  # skip very tiny
-                        simplified = b.simplify(0.5)
+                    if b.area > 5:  # was 100; lowered so small blocks are kept
+                        simplified = b.simplify(0.1)  # was 0.5; less aggressive
                         if simplified.is_valid and not simplified.is_empty:
                             blocks.append(simplified)
-                return blocks
             else:
-                # Single polygon result
-                if blocks_area.area > 100:
-                    simplified = blocks_area.simplify(0.5)
+                # Single polygon
+                if blocks_area.area > 5:
+                    simplified = blocks_area.simplify(0.1)
                     if simplified.is_valid and not simplified.is_empty:
-                        return [simplified]
-            return []
+                        blocks.append(simplified)
+
+            return blocks
+
         except Exception as e:
             if self.debug:
                 print(f"Error creating blocks: {e}")
@@ -2432,8 +2431,8 @@ class BlockCombiner:
                 shape = fp['polygon']
                 if block.intersects(shape):
                     intersection = block.intersection(shape)
-                    if not intersection.is_empty and intersection.area > 10:
-                        # Copy footprint and store the clipped geometry
+                    # Lower area cutoff from 10 down to 1
+                    if not intersection.is_empty and intersection.area > 1:
                         fp_copy = dict(fp)
                         fp_copy['polygon'] = intersection
                         block_buildings.append(fp_copy)
@@ -2444,7 +2443,7 @@ class BlockCombiner:
     def _analyze_block(self, block_buildings):
         """
         Inspect the buildings in this block to figure out a suitable block type
-        or average height. You can adapt this logic to your needs.
+        or average height. 
         """
         if not block_buildings:
             return {'type': 'residential', 'avg_height': 15.0}
@@ -2461,9 +2460,8 @@ class BlockCombiner:
             if b['type'] in type_counts:
                 type_counts[b['type']] += 1
             else:
-                type_counts['residential'] += 1  # fallback
+                type_counts['residential'] += 1
 
-        # The dominant type is the block type
         block_type = max(type_counts, key=type_counts.get)
         avg_height = weighted_height / total_area if total_area > 0 else 15.0
 
@@ -2479,6 +2477,8 @@ class BlockCombiner:
         Convert all footprints in this block into final 3D shapes,
         applying style rules, merging footprints, etc.
         """
+        from shapely.ops import unary_union
+
         if not block_buildings:
             return []
 
@@ -2502,21 +2502,19 @@ class BlockCombiner:
             polygons.append(footprints_union)
 
         for shape in polygons:
-            if shape.is_empty or shape.area < 50:
+            if shape.is_empty or shape.area < 2:  # was 50; keep smaller shapes
                 continue
 
-            # Simplify & buffer inward a bit if you like
-            cleaned = shape.simplify(0.5)
+            # Reduce simplification & negative buffering
+            cleaned = shape.simplify(0.1)  # was 0.5
             if not cleaned.is_valid or cleaned.is_empty:
                 continue
 
-            # Optionally buffer inward to avoid collisions
-            # (reduces the polygon edges slightly)
-            final_poly = cleaned.buffer(-0.3)
+            # We can reduce the inward buffer from -0.3 to -0.1 or remove it entirely
+            final_poly = cleaned.buffer(-0.1)
             if final_poly.is_empty:
                 continue
 
-            # Respect barrier lines inside the block
             if barrier_union:
                 clipped = final_poly.difference(barrier_union)
                 if clipped.is_empty:
@@ -2524,8 +2522,7 @@ class BlockCombiner:
             else:
                 clipped = final_poly
 
-            # At this point, 'clipped' is our final footprint
-            if clipped.is_empty or clipped.area < 10:
+            if clipped.is_empty or clipped.area < 1:
                 continue
 
             # Convert to single polygons if it's still a MultiPolygon
@@ -2535,7 +2532,7 @@ class BlockCombiner:
                 sub_polys = [clipped]
 
             for spoly in sub_polys:
-                if spoly.is_empty or spoly.area < 10:
+                if spoly.is_empty or spoly.area < 1:
                     continue
 
                 # Determine final building height
@@ -2561,7 +2558,6 @@ class BlockCombiner:
         min_h = type_specs['min_height']
         max_h = type_specs['max_height']
 
-        # Start around the block's average
         base = max(avg_height, min_h)
         if base < 15.0:
             base = 15.0
@@ -2588,6 +2584,8 @@ class BlockCombiner:
             choice['levels'] = max(1, choice['levels'] + random.randint(-1, 1))
         elif choice['name'] == 'flat':
             choice['border'] *= random.uniform(0.9, 1.1)
+        elif choice['name'] == 'sawtooth':
+            choice['angle'] = max(10, choice['angle'] + random.randint(-5, 5))
         # etc. for others
 
         return choice
