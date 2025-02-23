@@ -48,7 +48,7 @@ class BlockCombiner:
                 'roof_styles': [
                     {'name': 'sawtooth', 'angle': 30},
                     {'name': 'flat', 'border': 2.0},
-                    {'name': 'stepped', 'levels': 3}
+                    {'name': 'stepped', 'levels': 2}
                 ]
             },
             'commercial': {
@@ -56,8 +56,8 @@ class BlockCombiner:
                 'max_height': 40.0,
                 'roof_styles': [
                     {'name': 'modern', 'setback': 2.0},
-                    {'name': 'tiered', 'levels': 3},
-                    {'name': 'complex', 'variations': 4}
+                    {'name': 'tiered', 'levels': 2},
+                    {'name': 'complex', 'variations': 5}
                 ]
             }
         }
@@ -162,7 +162,7 @@ class BlockCombiner:
         Returns:
             list: Merged building features with appropriate roof styles
         """
-        AREA_THRESHOLD = 500  # in m²
+        AREA_THRESHOLD = 200  # in m²
         footprints = self._gather_all_footprints(features)
         barrier_union = self._create_barrier_union(features)
         
@@ -172,7 +172,7 @@ class BlockCombiner:
         
         merged_clusters = []
         visited = set()
-        merge_dist = self.style_manager.style.get("merge_distance", 20.0)
+        merge_dist = self.style_manager.style.get("merge_distance", 2.0)
         
         # Process small footprints
         for i, fp in enumerate(small):

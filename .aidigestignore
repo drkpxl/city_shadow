@@ -11,7 +11,7 @@ node_modules/
 
 # Exclude web
 
-server.js
-views/
+#server.js
+#views/
 package-lock.json
 package.json

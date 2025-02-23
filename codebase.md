@@ -2220,7 +2220,7 @@ class BlockCombiner:
                 'max_height': 25.0,
                 'roof_styles': [
                     {'name': 'pitched', 'height_factor': 0.3},
-                    {'name': 'tiered', 'levels': 2},
+                    {'name': 'tiered', 'levels': 20},
                     {'name': 'flat', 'border': 1.0}
                 ]
             },
@@ -2228,17 +2228,17 @@ class BlockCombiner:
                 'min_height': 15.0,
                 'max_height': 35.0,
                 'roof_styles': [
-                    {'name': 'sawtooth', 'angle': 30},
+                    #{'name': 'sawtooth', 'angle': 30},
                     {'name': 'flat', 'border': 2.0},
-                    {'name': 'stepped', 'levels': 3}
+                    {'name': 'stepped', 'levels': 30}
                 ]
             },
             'commercial': {
                 'min_height': 20.0,
                 'max_height': 40.0,
                 'roof_styles': [
-                    {'name': 'modern', 'setback': 2.0},
-                    {'name': 'tiered', 'levels': 3},
+                    {'name': 'modern', 'setback': 30.0},
+                    {'name': 'tiered', 'levels': 30},
                     {'name': 'complex', 'variations': 4}
                 ]
             }
@@ -2264,10 +2264,10 @@ class BlockCombiner:
                 'name': 'flat',
                 'border': random.uniform(0.8, 1.2)
             },
-            {
-                'name': 'sawtooth',
-                'angle': random.randint(25, 35)
-            },
+            #{
+            #    'name': 'sawtooth',
+            #    'angle': random.randint(25, 35)
+            #},
             {
                 'name': 'modern',
                 'setback': random.uniform(1.8, 2.2)
@@ -2344,7 +2344,7 @@ class BlockCombiner:
         Returns:
             list: Merged building features with appropriate roof styles
         """
-        AREA_THRESHOLD = 500  # in m²
+        AREA_THRESHOLD = 200  # in m²
         footprints = self._gather_all_footprints(features)
         barrier_union = self._create_barrier_union(features)
         
@@ -2354,7 +2354,7 @@ class BlockCombiner:
         
         merged_clusters = []
         visited = set()
-        merge_dist = self.style_manager.style.get("merge_distance", 20.0)
+        merge_dist = self.style_manager.style.get("merge_distance", 2.0)
         
         # Process small footprints
         for i, fp in enumerate(small):
@@ -2763,8 +2763,8 @@ class BlockCombiner:
             choice['levels'] = max(1, choice['levels'] + random.randint(-1, 1))
         elif choice['name'] == 'flat':
             choice['border'] *= random.uniform(0.9, 1.1)
-        elif choice['name'] == 'sawtooth':
-            choice['angle'] = max(10, choice['angle'] + random.randint(-5, 5))
+        #elif choice['name'] == 'sawtooth':
+        #    choice['angle'] = max(10, choice['angle'] + random.randint(-5, 5))
         elif choice['name'] == 'modern':
             choice['setback'] *= random.uniform(0.9, 1.1)
         elif choice['name'] == 'stepped':
@@ -2915,44 +2915,37 @@ class BuildingGenerator:
         self.style_manager = style_manager
 
     def generate_building_details(self, points_str, height, roof_style=None, roof_params=None, block_type=None):
-        """
-        Generate a building with its roof contained within its own extrusion space.
-        Each building+roof combination is self-contained and won't interfere with other features.
-        """
-        # For simple buildings, just extrude
+        """Generate a building with proper OpenSCAD syntax."""
+        # Basic building without roof
         if not roof_style or not roof_params:
-            return f"""
-                linear_extrude(height={height}, convexity=2)
-                    polygon([{points_str}]);"""
+            return f"linear_extrude(height={height}, convexity=2) polygon([{points_str}]);"
 
-        # Calculate heights for base and roof sections
+        # Buildings with roofs
         if roof_style == 'pitched':
             roof_height = height * roof_params['height_factor']
             base_height = height - roof_height
-            return f"""
-                union() {{
-                    // Base of building
-                    linear_extrude(height={base_height}, convexity=2)
+            return f"""union() {{
+                // Base building
+                linear_extrude(height={base_height}, convexity=2) 
+                    polygon([{points_str}]);
+                // Roof
+                translate([0, 0, {base_height}])
+                intersection() {{
+                    linear_extrude(height={roof_height}, scale=0.6, convexity=2)
                         polygon([{points_str}]);
-                    
-                    // Pitched roof - contained within the building's footprint
-                    translate([0, 0, {base_height}])
-                    intersection() {{
-                        linear_extrude(height={roof_height}, scale=0.6, convexity=2)
-                            polygon([{points_str}]);
-                        linear_extrude(height={roof_height}, convexity=2)
-                            polygon([{points_str}]);
-                    }}
-                }}"""
+                    linear_extrude(height={roof_height}, convexity=2)
+                        polygon([{points_str}]);
+                }}
+            }}"""
 
         elif roof_style == 'tiered':
             num_levels = roof_params['levels']
-            level_height = height / (num_levels + 1)  # +1 for base
+            level_height = height / (num_levels + 1)
             
             tiers = []
             for i in range(num_levels):
                 start_height = level_height * (i + 1)
-                inset = (i + 1) * 1.0  # Progressive inset
+                inset = (i + 1) * 1.0
                 tiers.append(f"""
                     translate([0, 0, {start_height}])
                     intersection() {{
@@ -2963,25 +2956,23 @@ class BuildingGenerator:
                             polygon([{points_str}]);
                     }}""")
             
-            return f"""
-                union() {{
-                    // Base building
-                    linear_extrude(height={level_height}, convexity=2)
-                        polygon([{points_str}]);
-                    {' '.join(tiers)}
-                }}"""
+            return f"""union() {{
+                // Base building
+                linear_extrude(height={level_height}, convexity=2)
+                    polygon([{points_str}]);
+                {' '.join(tiers)}
+            }}"""
 
-        # Add other roof styles following same pattern:
-        # 1. Always use intersection() to contain within building footprint
-        # 2. Keep all transformations relative to the building's base
-        # 3. Ensure total height matches specified height
+        # Default to basic building if roof style not handled
+        return f"linear_extrude(height={height}, convexity=2) polygon([{points_str}]);"
+   
     def _generate_specific_roof(self, points_str, height, roof_style, roof_params):
         """Generate a building with a specific roof style."""
         generators = {
             'pitched': self._generate_pitched_roof,
             'tiered': self._generate_tiered_roof,
             'flat': self._generate_flat_roof,
-            'sawtooth': self._generate_sawtooth_roof,
+            #'sawtooth': self._generate_sawtooth_roof,
             'modern': self._generate_modern_roof,
             'stepped': self._generate_stepped_roof
         }
@@ -3567,5 +3558,834 @@ watchdog>=2.1.0  # For file watching
 # Platform-specific requirements (comment out what you don't need):
 pywin32>=228; sys_platform == 'win32'  # For Windows auto-reload
 # Note: Linux requires xdotool (install via package manager)
+```
+
+# server.js
+
+```js
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const { spawn } = require("child_process");
+const fs = require("fs");
+const { v4: uuidv4 } = require("uuid");
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Set view engine to EJS
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+
+// Serve static files
+app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static("uploads"));
+app.use("/outputs", express.static("outputs"));
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// Ensure uploads/outputs folders exist
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+const outputsDir = path.join(__dirname, "outputs");
+if (!fs.existsSync(outputsDir)) {
+  fs.mkdirSync(outputsDir);
+}
+
+// Configure Multer storage
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/");
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + uuidv4();
+    cb(null, uniqueSuffix + "-" + file.originalname);
+  },
+});
+
+// Only allow .geojson files
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === ".geojson") {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid file type. Only .geojson files are allowed."));
+  }
+}
+
+// Create Multer instance with storage + fileFilter
+const upload = multer({ storage: storage, fileFilter: fileFilter });
+
+// -------------------------------------
+// ROUTES
+// -------------------------------------
+
+// Home route
+app.get("/", (req, res) => {
+  res.render("index");
+});
+
+// Endpoint to handle AJAX file upload
+app.post("/uploadFile", upload.single("geojson"), (req, res) => {
+  // If Multer’s fileFilter rejects the file, req.file will be undefined
+  if (!req.file) {
+    return res
+      .status(400)
+      .json({ error: "No valid .geojson file was uploaded." });
+  }
+  const filePath = path.join(__dirname, req.file.path);
+  res.json({ filePath: filePath });
+});
+
+// Live preview endpoint
+app.post("/preview", (req, res) => {
+  const uploadedFile = req.body.uploadedFile;
+  if (!uploadedFile) {
+    return res.status(400).json({ error: "No uploaded file provided." });
+  }
+  const outputBase = "preview-" + Date.now() + "-" + uuidv4();
+  const outputScad = path.join(outputsDir, outputBase + ".scad");
+
+  let args = [
+    path.join(__dirname, "geojson_to_shadow_city.py"),
+    uploadedFile,
+    outputScad,
+    "--export",
+    "preview",
+  ];
+
+  // Basic options
+  if (req.body.size) args.push("--size", req.body.size);
+  if (req.body.height) args.push("--height", req.body.height);
+  if (req.body.style) args.push("--style", req.body.style);
+  if (req.body.detail) args.push("--detail", req.body.detail);
+  if (req.body["merge-distance"])
+    args.push("--merge-distance", req.body["merge-distance"]);
+  if (req.body["cluster-size"])
+    args.push("--cluster-size", req.body["cluster-size"]);
+  if (req.body["height-variance"])
+    args.push("--height-variance", req.body["height-variance"]);
+  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
+  if (req.body["water-depth"])
+    args.push("--water-depth", req.body["water-depth"]);
+  if (req.body["min-building-area"])
+    args.push("--min-building-area", req.body["min-building-area"]);
+  if (req.body.debug === "on") args.push("--debug");
+
+  // NEW bridging lines
+  if (req.body["bridge-height"]) {
+    args.push("--bridge-height", req.body["bridge-height"]);
+  }
+  if (req.body["bridge-thickness"]) {
+    args.push("--bridge-thickness", req.body["bridge-thickness"]);
+  }
+  if (req.body["support-width"]) {
+    args.push("--support-width", req.body["support-width"]);
+  }
+
+  // Preprocessing
+  if (req.body.preprocess === "on") args.push("--preprocess");
+  if (req.body["crop-distance"])
+    args.push("--crop-distance", req.body["crop-distance"]);
+  if (req.body["crop-bbox"]) {
+    const bbox = req.body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      args.push(
+        "--crop-bbox",
+        bbox[0].toString(),
+        bbox[1].toString(),
+        bbox[2].toString(),
+        bbox[3].toString()
+      );
+    }
+  }
+
+  // Preview integration
+  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
+    args.push(
+      "--preview-size",
+      req.body["preview-size-width"],
+      req.body["preview-size-height"]
+    );
+  }
+  if (req.body["preview-file"]) {
+    args.push("--preview-file", req.body["preview-file"]);
+  }
+  if (req.body.watch === "on") {
+    args.push("--watch");
+  }
+  if (req.body["openscad-path"]) {
+    args.push("--openscad-path", req.body["openscad-path"]);
+  }
+
+  console.log("Live preview generation command:", args.join(" "));
+
+  const pythonProcess = spawn("python3", args);
+  let stdoutData = "";
+  let stderrData = "";
+
+  pythonProcess.stdout.on("data", (data) => {
+    stdoutData += data.toString();
+  });
+  pythonProcess.stderr.on("data", (data) => {
+    stderrData += data.toString();
+  });
+  pythonProcess.on("close", (code) => {
+    if (code !== 0) {
+      console.error("Python preview process exited with code", code);
+      console.error(stderrData);
+      return res.status(500).json({ error: stderrData });
+    }
+    const previewMain = outputBase + "_preview_main.png";
+    const previewFrame = outputBase + "_preview_frame.png";
+
+    res.json({
+      previewMain: "/outputs/" + previewMain,
+      previewFrame: "/outputs/" + previewFrame,
+      stdout: stdoutData,
+      stderr: stderrData,
+    });
+  });
+});
+
+// Final render endpoint
+app.post("/render", (req, res) => {
+  const uploadedFile = req.body.uploadedFile;
+  if (!uploadedFile) {
+    return res.status(400).json({ error: "No uploaded file provided." });
+  }
+  const outputBase = "output-" + Date.now() + "-" + uuidv4();
+  const outputPath = path.join(outputsDir, outputBase + ".scad");
+
+  let args = [
+    path.join(__dirname, "geojson_to_shadow_city.py"),
+    uploadedFile,
+    outputPath,
+  ];
+
+  // Basic options
+  if (req.body.size) args.push("--size", req.body.size);
+  if (req.body.height) args.push("--height", req.body.height);
+  if (req.body.style) args.push("--style", req.body.style);
+  if (req.body.detail) args.push("--detail", req.body.detail);
+  if (req.body["merge-distance"])
+    args.push("--merge-distance", req.body["merge-distance"]);
+  if (req.body["cluster-size"])
+    args.push("--cluster-size", req.body["cluster-size"]);
+  if (req.body["height-variance"])
+    args.push("--height-variance", req.body["height-variance"]);
+  if (req.body["road-width"]) args.push("--road-width", req.body["road-width"]);
+  if (req.body["water-depth"])
+    args.push("--water-depth", req.body["water-depth"]);
+  if (req.body["min-building-area"])
+    args.push("--min-building-area", req.body["min-building-area"]);
+  if (req.body.debug === "on") args.push("--debug");
+
+  // NEW bridging lines
+  if (req.body["bridge-height"]) {
+    args.push("--bridge-height", req.body["bridge-height"]);
+  }
+  if (req.body["bridge-thickness"]) {
+    args.push("--bridge-thickness", req.body["bridge-thickness"]);
+  }
+  if (req.body["support-width"]) {
+    args.push("--support-width", req.body["support-width"]);
+  }
+
+  // Preprocessing
+  if (req.body.preprocess === "on") args.push("--preprocess");
+  if (req.body["crop-distance"])
+    args.push("--crop-distance", req.body["crop-distance"]);
+  if (req.body["crop-bbox"]) {
+    const bbox = req.body["crop-bbox"]
+      .split(",")
+      .map((coord) => coord.trim())
+      .map(Number);
+    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
+      args.push(
+        "--crop-bbox",
+        bbox[0].toString(),
+        bbox[1].toString(),
+        bbox[2].toString(),
+        bbox[3].toString()
+      );
+    }
+  }
+
+  // Export options
+  if (req.body.export) args.push("--export", req.body.export);
+  if (req.body["output-stl"]) args.push("--output-stl", req.body["output-stl"]);
+  if (req.body["no-repair"] === "on") args.push("--no-repair");
+  if (req.body.force === "on") args.push("--force");
+
+  // Preview & integration
+  if (req.body["preview-size-width"] && req.body["preview-size-height"]) {
+    args.push(
+      "--preview-size",
+      req.body["preview-size-width"],
+      req.body["preview-size-height"]
+    );
+  }
+  if (req.body["preview-file"]) {
+    args.push("--preview-file", req.body["preview-file"]);
+  }
+  if (req.body.watch === "on") {
+    args.push("--watch");
+  }
+  if (req.body["openscad-path"]) {
+    args.push("--openscad-path", req.body["openscad-path"]);
+  }
+
+  console.log("Final render command:", args.join(" "));
+
+  const pythonProcess = spawn("python3", args);
+  let stdoutData = "";
+  let stderrData = "";
+
+  pythonProcess.stdout.on("data", (data) => {
+    stdoutData += data.toString();
+  });
+  pythonProcess.stderr.on("data", (data) => {
+    stderrData += data.toString();
+  });
+  pythonProcess.on("close", (code) => {
+    if (code !== 0) {
+      console.error("Python final render process exited with code", code);
+      console.error(stderrData);
+      return res.status(500).json({ error: stderrData });
+    }
+    const mainScad = outputBase + "_main.scad";
+    const frameScad = outputBase + "_frame.scad";
+    const logFile = outputBase + ".scad.log";
+
+    let stlFiles = {};
+    if (req.body.export === "stl" || req.body.export === "both") {
+      const mainStl = outputBase + "_main.stl";
+      const frameStl = outputBase + "_frame.stl";
+      stlFiles = {
+        mainStl: "/outputs/" + mainStl,
+        frameStl: "/outputs/" + frameStl,
+      };
+    }
+
+    res.json({
+      mainScad: "/outputs/" + mainScad,
+      frameScad: "/outputs/" + frameScad,
+      logFile: "/outputs/" + logFile,
+      stlFiles: stlFiles,
+      stdout: stdoutData,
+      stderr: stderrData,
+    });
+  });
+});
+
+// Fallback /upload endpoint (if needed)
+app.post("/upload", upload.single("geojson"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).send("No valid .geojson file was uploaded.");
+  }
+  res.redirect("/");
+});
+
+// Start the server
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+
+```
+
+# views/index.ejs
+
+```ejs
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow City Generator Frontend</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+    .preview-container {
+      margin-top: 20px;
+    }
+
+    .preview-container img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+      padding: 5px;
+    }
+
+    .download-links a {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .log-container {
+      margin-top: 20px;
+    }
+
+    #liveLog {
+      background-color: #1e1e1e;
+      color: #cfcfcf;
+      padding: 10px;
+      border-radius: 5px;
+      min-height: 100px;
+      max-height: 600px;
+      overflow-y: scroll;
+      font-family: monospace;
+      white-space: pre;
+    }
+
+    .processing-indicator {
+      display: none;
+      color: #007bff;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1 class="mt-5">Shadow City Generator</h1>
+    <p class="lead">Use the form to upload a GeoJSON file and set options. Live previews and downloadable outputs will
+      appear on the right.</p>
+
+    <!-- Hidden field to store uploaded file path -->
+    <input type="hidden" id="uploadedFile" name="uploadedFile" value="">
+
+    <div class="row">
+      <!-- Left Column: Form and Options -->
+      <div class="col-md-4">
+        <form id="optionsForm">
+          <!-- File Upload -->
+          <div class="form-group">
+            <label for="geojson">GeoJSON File</label>
+            <input type="file" class="form-control-file" id="geojson" name="geojson" accept=".geojson" required>
+          </div>
+
+          <!-- Preprocessing Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preprocessing Options</legend>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="preprocess" name="preprocess">
+              <label class="form-check-label" for="preprocess">Enable Preprocessing</label>
+            </div>
+            <div class="form-group">
+              <label for="crop-distance">Crop Distance (meters)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="crop-distance" name="crop-distance">
+            </div>
+            <div class="form-group">
+              <label for="crop-bbox">Bounding Box (paste from Overpass)</label>
+              <input type="text" class="form-control live-preview" id="crop-bbox" name="crop-bbox"
+                placeholder="e.g. 26.942061, -80.074937, 26.94714, -80.070162">
+            </div>
+          </fieldset>
+
+          <!-- Basic Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Basic Options</legend>
+            <div class="form-group">
+              <label for="size">Model Size (mm)</label>
+              <input type="number" class="form-control live-preview" id="size" name="size" value="200" required>
+            </div>
+            <div class="form-group">
+              <label for="height">Maximum Height (mm)</label>
+              <input type="number" class="form-control live-preview" id="height" name="height" value="20" required>
+            </div>
+            <div class="form-group">
+              <label for="style">Artistic Style</label>
+              <select class="form-control live-preview" id="style" name="style">
+                <option value="modern">Modern</option>
+                <option value="classic">Classic</option>
+                <option value="minimal">Minimal</option>
+                <option value="block-combine" selected>Block Combine</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="detail">Detail Level (0-2)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="detail" name="detail" value="1.0"
+                required>
+            </div>
+            <div class="form-group">
+              <label for="merge-distance">Merge Distance</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="merge-distance"
+                name="merge-distance" value="2.0">
+            </div>
+            <div class="form-group">
+              <label for="cluster-size">Cluster Size</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="cluster-size" name="cluster-size"
+                value="3.0">
+            </div>
+            <div class="form-group">
+              <label for="height-variance">Height Variance</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="height-variance"
+                name="height-variance" value="0.2">
+            </div>
+            <div class="form-group">
+              <label for="road-width">Road Width (mm)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="road-width" name="road-width"
+                value="1.2">
+            </div>
+            <div class="form-group">
+              <label for="water-depth">Water Depth (mm)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="water-depth" name="water-depth"
+                value="2">
+            </div>
+            <div class="form-group">
+              <label for="min-building-area">Minimum Building Area (m²)</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="min-building-area"
+                name="min-building-area" value="200.0">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="debug" name="debug">
+              <label class="form-check-label" for="debug">Enable Debug Output</label>
+            </div>
+          </fieldset>
+
+          <!-- Bridge Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Bridge Options</legend>
+            <div class="form-group">
+              <label for="bridge-height">Bridge Deck Height Above Base</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="bridge-height" name="bridge-height"
+                value="2.0">
+            </div>
+            <div class="form-group">
+              <label for="bridge-thickness">Bridge Deck Thickness</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="bridge-thickness"
+                name="bridge-thickness" value="0.6">
+            </div>
+            <div class="form-group">
+              <label for="support-width">Bridge Support Radius</label>
+              <input type="number" step="0.1" class="form-control live-preview" id="support-width" name="support-width"
+                value="2.0">
+            </div>
+          </fieldset>
+
+          <!-- Export Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Export Options</legend>
+            <div class="form-group">
+              <label for="export">Export Format</label>
+              <select class="form-control live-preview" id="export" name="export">
+                <option value="preview">Preview</option>
+                <option value="stl">STL</option>
+                <option value="both" selected>Both</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="output-stl">Output STL Filename</label>
+              <input type="text" class="form-control live-preview" id="output-stl" name="output-stl"
+                placeholder="Optional">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="no-repair" name="no-repair">
+              <label class="form-check-label" for="no-repair">Disable Automatic Geometry Repair</label>
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="force" name="force">
+              <label class="form-check-label" for="force">Force STL Generation on Validation Failure</label>
+            </div>
+          </fieldset>
+
+          <!-- Preview & Integration Options -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Preview &amp; Integration Options</legend>
+            <div class="form-group">
+              <label>Preview Image Size (Width, Height in pixels)</label>
+              <div class="form-row">
+                <div class="col">
+                  <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
+                    value="1080">
+                </div>
+                <div class="col">
+                  <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
+                    value="1080">
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="preview-file">Preview Image Filename</label>
+              <input type="text" class="form-control live-preview" id="preview-file" name="preview-file"
+                placeholder="Optional">
+            </div>
+            <div class="form-group form-check">
+              <input type="checkbox" class="form-check-input live-preview" id="watch" name="watch">
+              <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
+            </div>
+            <div class="form-group">
+              <label for="openscad-path">OpenSCAD Executable Path</label>
+              <input type="text" class="form-control live-preview" id="openscad-path" name="openscad-path"
+                placeholder="Optional">
+            </div>
+          </fieldset>
+
+          <!-- Final Render Button -->
+          <button type="button" id="renderBtn" class="btn btn-success mb-3">Render Final Model</button>
+        </form>
+      </div>
+
+      <!-- Right Column: Live Previews and Downloadable Files -->
+      <div class="col-md-8">
+        <div class="processing-indicator">
+          Processing changes... Preview will update in 2 seconds.
+        </div>
+
+        <div class="preview-container">
+          <h3>Live Preview - Main Model</h3>
+          <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
+        </div>
+
+        <!--      <div class="preview-container">
+          <h3>Live Preview - Frame Model</h3>
+          <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
+        </div>
+      -->
+        <div class="log-container">
+          <h4>Live Log</h4>
+          <div id="liveLog"></div>
+        </div>
+
+        <div class="download-links mt-4">
+          <h4>Download Rendered Files</h4>
+          <div id="downloadLinks">
+            <!-- Links will be inserted here after final render -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Debounce function to limit how often a function can be called
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        // Show processing indicator
+        $(".processing-indicator").show();
+
+        const later = () => {
+          clearTimeout(timeout);
+          $(".processing-indicator").hide();
+          func(...args);
+        };
+
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
+    // Function to update the live preview images
+    function updatePreview() {
+      var uploadedFile = $("#uploadedFile").val();
+      if (!uploadedFile) {
+        console.log("No file uploaded yet.");
+        return;
+      }
+
+      updateLog("Generating preview...");
+
+      var formData = $("#optionsForm").serializeArray();
+      formData.push({ name: "uploadedFile", value: uploadedFile });
+
+      $.ajax({
+        url: "/preview",
+        type: "POST",
+        data: formData,
+        success: function (data) {
+          if (data.previewMain && data.previewFrame) {
+            $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
+            $("#previewFrame").attr("src", data.previewFrame + "?t=" + new Date().getTime()).show();
+          }
+
+          var logText = "";
+          if (data.stdout) {
+            logText += data.stdout + "\n";
+          }
+          if (data.stderr) {
+            logText += data.stderr + "\n";
+          }
+          if (logText.trim().length > 0) {
+            updateLog(logText);
+          }
+        },
+        error: function (err) {
+          console.error("Preview update error:", err);
+          updateLog("Error generating preview:\n" + JSON.stringify(err));
+        }
+      });
+    }
+
+    // Function to auto-scroll log to the newest entry
+    function scrollToBottom() {
+      var logContainer = $("#liveLog");
+      logContainer.scrollTop(logContainer[0].scrollHeight);
+    }
+
+    // Function to append new log entries and auto-scroll
+    function updateLog(text) {
+      var logContainer = $("#liveLog");
+      logContainer.append(text + "\n"); // Append new log entries
+      scrollToBottom(); // Auto-scroll to bottom
+    }
+
+    // Create debounced version of updatePreview with 2 second delay
+    const debouncedUpdatePreview = debounce(updatePreview, 2000);
+
+    // Handle file upload
+    $("#geojson").on("change", function () {
+      var fileInput = document.getElementById("geojson");
+      if (fileInput.files.length === 0) return;
+
+      var formData = new FormData();
+      formData.append("geojson", fileInput.files[0]);
+
+      $.ajax({
+        url: "/uploadFile",
+        type: "POST",
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function (data) {
+          if (data.filePath) {
+            $("#uploadedFile").val(data.filePath);
+            debouncedUpdatePreview();
+          }
+        },
+        error: function (err) {
+          console.error("File upload error:", err);
+          updateLog("Error uploading file:\n" + JSON.stringify(err));
+        }
+      });
+    });
+
+    // Update live preview when any option changes
+    $(".live-preview").on("change keyup", function () {
+      debouncedUpdatePreview();
+    });
+
+    // Handle final render button click
+    $("#renderBtn").on("click", function () {
+      var uploadedFile = $("#uploadedFile").val();
+      if (!uploadedFile) {
+        alert("Please upload a GeoJSON file first.");
+        return;
+      }
+
+      updateLog("Generating final render...");
+      var formData = $("#optionsForm").serializeArray();
+      formData.push({ name: "uploadedFile", value: uploadedFile });
+
+      $.ajax({
+        url: "/render",
+        type: "POST",
+        data: formData,
+        success: function (data) {
+          var linksHtml = "";
+
+          if (data.mainScad) {
+            linksHtml += '<a href="' + data.mainScad + '" download>Main Model (SCAD)</a><br>';
+          }
+          if (data.frameScad) {
+            linksHtml += '<a href="' + data.frameScad + '" download>Frame Model (SCAD)</a><br>';
+          }
+
+          if (data.stlFiles && data.stlFiles.mainStl) {
+            linksHtml += '<a href="' + data.stlFiles.mainStl + '" download>Main Model (STL)</a><br>';
+          }
+          if (data.stlFiles && data.stlFiles.frameStl) {
+            linksHtml += '<a href="' + data.stlFiles.frameStl + '" download>Frame Model (STL)</a><br>';
+          }
+
+          if (data.logFile) {
+            linksHtml += '<a href="' + data.logFile + '" download>Debug Log</a><br>';
+          }
+
+          $("#downloadLinks").html(linksHtml);
+
+          var logText = "";
+          if (data.stdout) {
+            logText += data.stdout + "\n";
+          }
+          if (data.stderr) {
+            logText += data.stderr + "\n";
+          }
+          if (logText.trim().length > 0) {
+            updateLog(logText);
+          }
+        },
+        error: function (err) {
+          console.error("Final render error:", err);
+          updateLog("Error during final render:\n" + JSON.stringify(err));
+          alert("An error occurred during final render.");
+        }
+      });
+    });
+
+  </script>
+</body>
+
+</html>
+```
+
+# views/result.ejs
+
+```ejs
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Generation Result</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1 class="mt-5">Generation Result</h1>
+    <p class="lead">The Shadow City model has been generated. Download the output files below:</p>
+    <ul class="list-group">
+      <li class="list-group-item">
+        <a href="<%= mainScad %>" download>Main Model (SCAD)</a>
+      </li>
+      <li class="list-group-item">
+        <a href="<%= frameScad %>" download>Frame Model (SCAD)</a>
+      </li>
+      <% if (stlFiles && stlFiles.mainStl) { %>
+        <li class="list-group-item">
+          <a href="<%= stlFiles.mainStl %>" download>Main Model (STL)</a>
+        </li>
+        <li class="list-group-item">
+          <a href="<%= stlFiles.frameStl %>" download>Frame Model (STL)</a>
+        </li>
+        <% } %>
+          <li class="list-group-item">
+            <a href="<%= logFile %>" download>Debug Log</a>
+          </li>
+    </ul>
+    <hr>
+    <h3>Process Output</h3>
+    <div class="card">
+      <div class="card-body">
+        <h5>Standard Output</h5>
+        <pre><%= stdout %></pre>
+        <h5>Error Output</h5>
+        <pre><%= stderr %></pre>
+      </div>
+    </div>
+    <a href="/" class="btn btn-secondary mt-3">Back to Home</a>
+  </div>
+</body>
+
+</html>
 ```
 
