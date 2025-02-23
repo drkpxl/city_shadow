@@ -203,13 +203,6 @@ app.post("/render", async (req, res) => {
   }
 });
 
-app.post("/upload", upload.single("geojson"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).send("No valid .geojson file was uploaded.");
-  }
-  res.redirect("/");
-});
-
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

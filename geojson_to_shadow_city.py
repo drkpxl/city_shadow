@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import time
 from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
 from lib.preview.openscad_integration import OpenSCADIntegration
