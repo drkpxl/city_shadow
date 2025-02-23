@@ -104,27 +104,6 @@ def main():
         help="Bounding box coordinates for cropping",
     )
 
-    # Preview options
-    preview_group = parser.add_argument_group("Preview and Integration")
-    preview_group.add_argument(
-        "--preview-size",
-        type=int,
-        nargs=2,
-        metavar=("WIDTH", "HEIGHT"),
-        default=[1080, 1080],
-        help="Preview image size in pixels",
-    )
-    preview_group.add_argument(
-        "--preview-file",
-        help="Preview image filename (default: based on SCAD filename)",
-    )
-    preview_group.add_argument(
-        "--watch",
-        action="store_true",
-        help="Watch SCAD file and auto-reload in OpenSCAD",
-    )
-    preview_group.add_argument("--openscad-path", help="Path to OpenSCAD executable")
-
     args = parser.parse_args()
 
     try:
@@ -170,35 +149,21 @@ def main():
         else:
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
-
         # Set up OpenSCAD integration
-        integration = OpenSCADIntegration(args.openscad_path)
+        integration = OpenSCADIntegration()
 
-        # Generate preview images
-        preview_file = args.preview_file or args.output_scad.replace(".scad", "_preview.png")
-        if args.preview_size:
-            print("\nGenerating preview image...")
-            integration.generate_preview(
-                args.output_scad, preview_file, size=args.preview_size
-            )
+        # Generate preview images with fixed size
+        preview_file = args.output_scad.replace(".scad", "_preview.png")
+        print("\nGenerating preview image...")
+        integration.generate_preview(
+            args.output_scad, preview_file, size=[1080, 1080]
+        )
 
-        # Only generate STL files for final render (when preview_size isn't set)
-        if not args.preview_size:
-            print("\nGenerating STL files...")
-            stl_file = args.output_scad.replace(".scad", ".stl")
-            integration.generate_stl(args.output_scad, stl_file)
-
-        if args.watch:
-            print("\nStarting OpenSCAD integration...")
-            print("Press Ctrl+C to stop watching")
-            integration.watch_and_reload(args.output_scad)
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                integration.stop_watching()
-                print("\nStopped watching SCAD file")
-
+        # Generate STL files
+        print("\nGenerating STL files...")
+        stl_file = args.output_scad.replace(".scad", ".stl")
+        integration.generate_stl(args.output_scad, stl_file)
+    
     except Exception as e:
         print(f"Error: {str(e)}")
         raise

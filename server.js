@@ -95,20 +95,6 @@ const processPreprocessingOptions = (body, args) => {
   }
 };
 
-const processPreviewOptions = (body, args) => {
-  if (body["preview-size-width"] && body["preview-size-height"]) {
-    args.push(
-      "--preview-size",
-      body["preview-size-width"],
-      body["preview-size-height"]
-    );
-  }
-  if (body["preview-file"]) args.push("--preview-file", body["preview-file"]);
-  if (body.watch === "on") args.push("--watch");
-  if (body["openscad-path"])
-    args.push("--openscad-path", body["openscad-path"]);
-};
-
 const buildPythonArgs = (inputFile, outputFile, body) => {
   const args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
@@ -119,7 +105,6 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
   processBasicOptions(body, args);
   processBridgeOptions(body, args);
   processPreprocessingOptions(body, args);
-  processPreviewOptions(body, args);
 
   return args;
 };
