@@ -43,6 +43,10 @@ class StyleManager:
             "base": {
                 "height": 5,
             },
+            "parks": {
+                "start_offset": 0,  # Height offset above the base for parks
+                "thickness": 0.5      # Extrusion thickness for parks
+            },
         }
 
     def scale_building_height(self, properties):
