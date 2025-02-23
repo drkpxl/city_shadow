@@ -124,27 +124,6 @@ def main():
         help="Bounding box coordinates for cropping",
     )
 
-    # Preview options
-    preview_group = parser.add_argument_group("Preview and Integration")
-    preview_group.add_argument(
-        "--preview-size",
-        type=int,
-        nargs=2,
-        metavar=("WIDTH", "HEIGHT"),
-        default=[1080, 1080],
-        help="Preview image size in pixels",
-    )
-    preview_group.add_argument(
-        "--preview-file",
-        help="Preview image filename (default: based on SCAD filename)",
-    )
-    preview_group.add_argument(
-        "--watch",
-        action="store_true",
-        help="Watch SCAD file and auto-reload in OpenSCAD",
-    )
-    preview_group.add_argument("--openscad-path", help="Path to OpenSCAD executable")
-
     args = parser.parse_args()
 
     try:
@@ -190,35 +169,22 @@ def main():
         else:
             # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
-
         # Set up OpenSCAD integration
-        integration = OpenSCADIntegration(args.openscad_path)
+        integration = OpenSCADIntegration()
+
+        # Hardcoded preview settings
+        preview_size = [1080, 1080]  # Fixed image size
+        preview_file = args.output_scad.replace(".scad", "_preview.png")
 
         # Generate preview images
-        preview_file = args.preview_file or args.output_scad.replace(".scad", "_preview.png")
-        if args.preview_size:
-            print("\nGenerating preview image...")
-            integration.generate_preview(
-                args.output_scad, preview_file, size=args.preview_size
-            )
+        print("\nGenerating preview image...")
+        integration.generate_preview(args.output_scad, preview_file, size=preview_size)
 
-        # Only generate STL files for final render (when preview_size isn't set)
-        if not args.preview_size:
-            print("\nGenerating STL files...")
-            stl_file = args.output_scad.replace(".scad", ".stl")
-            integration.generate_stl(args.output_scad, stl_file)
-
-        if args.watch:
-            print("\nStarting OpenSCAD integration...")
-            print("Press Ctrl+C to stop watching")
-            integration.watch_and_reload(args.output_scad)
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                integration.stop_watching()
-                print("\nStopped watching SCAD file")
-
+        # Generate STL files (using export_manager.py)
+        print("\nGenerating STL files...")
+        stl_file = args.output_scad.replace(".scad", ".stl")
+        integration.generate_stl(args.output_scad, stl_file)
+    
     except Exception as e:
         print(f"Error: {str(e)}")
         raise
@@ -1325,121 +1291,6 @@ class ExportManager:
         subprocess.run(command, env=env, capture_output=True, text=True, check=True)
 ```
 
-# lib/preview/file_watcher.py
-
-```py
-# lib/preview/file_watcher.py
-import os
-import sys
-import time
-import threading
-import subprocess
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
-
-class FileWatcher:
-    def __init__(self):
-        self.observer = None
-        self.watch_thread = None
-        self.running = False
-
-    def watch_and_reload(self, scad_file, openscad_path):
-        """Watch SCAD file and trigger auto-reload in OpenSCAD."""
-        subprocess.Popen([openscad_path, scad_file])
-
-        class SCDHandler(FileSystemEventHandler):
-            def __init__(self, scad_path):
-                self.scad_path = scad_path
-                self.last_reload = 0
-                self.reload_cooldown = 1.0
-
-            def on_modified(self, event):
-                if event.src_path == self.scad_path:
-                    current_time = time.time()
-                    if current_time - self.last_reload >= self.reload_cooldown:
-                        self._reload_openscad()
-                        self.last_reload = current_time
-
-            def _reload_openscad(self):
-                if sys.platform == "win32":
-                    self._reload_windows()
-                elif sys.platform == "darwin":
-                    self._reload_macos()
-                else:
-                    self._reload_linux()
-
-            def _reload_windows(self):
-                import win32gui
-                import win32con
-
-                def callback(hwnd, _):
-                    if "OpenSCAD" in win32gui.GetWindowText(hwnd):
-                        win32gui.SetForegroundWindow(hwnd)
-                        win32gui.PostMessage(
-                            hwnd, win32con.WM_KEYDOWN, win32con.VK_F5, 0
-                        )
-
-                win32gui.EnumWindows(callback, None)
-
-            def _reload_macos(self):
-                subprocess.run(
-                    [
-                        "osascript",
-                        "-e",
-                        'tell application "OpenSCAD" to activate\n'
-                        + 'tell application "System Events"\n'
-                        + 'keystroke "r" using {command down}\n'
-                        + "end tell",
-                    ]
-                )
-
-            def _reload_linux(self):
-                try:
-                    subprocess.run(
-                        [
-                            "xdotool",
-                            "search",
-                            "--name",
-                            "OpenSCAD",
-                            "windowactivate",
-                            "--sync",
-                            "key",
-                            "F5",
-                        ]
-                    )
-                except:
-                    print(
-                        "Warning: xdotool not found. Auto-reload may not work on Linux."
-                    )
-
-        self.running = True
-        event_handler = SCDHandler(os.path.abspath(scad_file))
-        self.observer = Observer()
-        self.observer.schedule(
-            event_handler, os.path.dirname(scad_file), recursive=False
-        )
-        self.observer.start()
-
-        def watch_thread():
-            while self.running:
-                time.sleep(1)
-            self.observer.stop()
-            self.observer.join()
-
-        self.watch_thread = threading.Thread(target=watch_thread)
-        self.watch_thread.start()
-
-    def stop_watching(self):
-        """Stop watching the SCAD file."""
-        if self.running:
-            self.running = False
-            if self.watch_thread:
-                self.watch_thread.join()
-                self.watch_thread = None
-
-```
-
 # lib/preview/openscad_integration.py
 
 ```py
@@ -1449,8 +1300,6 @@ import os
 import sys
 from .preview_generator import PreviewGenerator
 from .export_manager import ExportManager
-from .file_watcher import FileWatcher
-
 
 class OpenSCADIntegration:
     def __init__(self, openscad_path=None):
@@ -1460,7 +1309,6 @@ class OpenSCADIntegration:
 
         self.preview_generator = PreviewGenerator(self.openscad_path)
         self.export_manager = ExportManager(self.openscad_path)
-        self.file_watcher = FileWatcher()
 
     def _find_openscad(self):
         """Find the OpenSCAD executable."""
@@ -1475,9 +1323,7 @@ class OpenSCADIntegration:
         elif sys.platform == "darwin":
             possible_paths = [
                 "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
-                os.path.expanduser(
-                    "~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
-                ),
+                os.path.expanduser("~/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"),
             ]
             for path in possible_paths:
                 if os.path.exists(path):
@@ -1489,21 +1335,13 @@ class OpenSCADIntegration:
                 pass
         return None
 
-    def generate_preview(self, output_file, output_image, size=(1920, 1080)):
-        """Generate preview using PreviewGenerator."""
+    def generate_preview(self, output_file, output_image, size=(1080, 1080)):
+        """Generate preview images using PreviewGenerator."""
         return self.preview_generator.generate(output_file, output_image, size)
 
     def generate_stl(self, scad_file, output_stl):
         """Generate STL files using ExportManager."""
         return self.export_manager.generate_stl(scad_file, output_stl)
-
-    def watch_and_reload(self, scad_file):
-        """Watch SCAD file using FileWatcher."""
-        return self.file_watcher.watch_and_reload(scad_file, self.openscad_path)
-
-    def stop_watching(self):
-        """Stop file watching."""
-        self.file_watcher.stop_watching()
 ```
 
 # lib/preview/preview_generator.py
@@ -3422,20 +3260,6 @@ const processPreprocessingOptions = (body, args) => {
   }
 };
 
-const processPreviewOptions = (body, args) => {
-  if (body["preview-size-width"] && body["preview-size-height"]) {
-    args.push(
-      "--preview-size",
-      body["preview-size-width"],
-      body["preview-size-height"]
-    );
-  }
-  if (body["preview-file"]) args.push("--preview-file", body["preview-file"]);
-  if (body.watch === "on") args.push("--watch");
-  if (body["openscad-path"])
-    args.push("--openscad-path", body["openscad-path"]);
-};
-
 const buildPythonArgs = (inputFile, outputFile, body) => {
   const args = [
     path.join(__dirname, "geojson_to_shadow_city.py"),
@@ -3446,7 +3270,6 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
   processBasicOptions(body, args);
   processBridgeOptions(body, args);
   processPreprocessingOptions(body, args);
-  processPreviewOptions(body, args);
 
   return args;
 };
@@ -3692,37 +3515,6 @@ app.listen(port, () => {
             </div>
           </fieldset>
 
-          <!-- Preview & Integration Options -->
-          <fieldset class="border p-3 mb-3">
-            <legend class="w-auto">Preview &amp; Integration Options</legend>
-            <div class="form-group">
-              <label>Preview Image Size (Width, Height in pixels)</label>
-              <div class="form-row">
-                <div class="col">
-                  <input type="number" class="form-control live-preview" placeholder="Width" name="preview-size-width"
-                    value="1080">
-                </div>
-                <div class="col">
-                  <input type="number" class="form-control live-preview" placeholder="Height" name="preview-size-height"
-                    value="1080">
-                </div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="preview-file">Preview Image Filename</label>
-              <input type="text" class="form-control live-preview" id="preview-file" name="preview-file"
-                placeholder="Optional">
-            </div>
-            <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input live-preview" id="watch" name="watch">
-              <label class="form-check-label" for="watch">Watch SCAD File and Auto-Reload</label>
-            </div>
-            <div class="form-group">
-              <label for="openscad-path">OpenSCAD Executable Path</label>
-              <input type="text" class="form-control live-preview" id="openscad-path" name="openscad-path"
-                placeholder="Optional">
-            </div>
-          </fieldset>
 
           <!-- Final Render Button -->
           <button type="button" id="renderBtn" class="btn btn-success mb-3">Render Final Model</button>

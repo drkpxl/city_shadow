@@ -152,7 +152,7 @@ def main():
         # Set up OpenSCAD integration
         integration = OpenSCADIntegration()
 
-       # Hardcoded preview settings
+        # Hardcoded preview settings
         preview_size = [1080, 1080]  # Fixed image size
         preview_file = args.output_scad.replace(".scad", "_preview.png")
 
