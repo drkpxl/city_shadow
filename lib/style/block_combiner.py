@@ -1,9 +1,10 @@
-# lib/block_combiner.py
-from shapely.geometry import Polygon, MultiPolygon, box, LineString, mapping
-from shapely.ops import unary_union, polygonize
+# lib/style/block_combiner.py
+
+import random
+from shapely.geometry import Polygon, MultiPolygon, box, LineString
+from shapely.ops import unary_union
 from shapely.validation import make_valid
 from ..geometry import GeometryUtils
-from .style_manager import StyleManager
 
 
 class BlockCombiner:
@@ -14,25 +15,26 @@ class BlockCombiner:
 
     def combine_buildings_by_block(self, features):
         """
-        Fill each block that has any building coverage.
+        Fill each block that has any building coverage. For each block:
+          1) Compute a block-wide height based on the largest building in that block.
+          2) Slightly randomize the final height to avoid uniform extrusions.
+          3) Randomly pick a 'roof_style' so block roofs vary (flat, sawtooth, etc.).
         """
         if self.debug:
             print("\nStarting block combination process...")
             print(f"Number of input buildings: {len(features.get('buildings', []))}")
 
-        # Create blocks from road network
+        # 1) Create blocks from road network
         blocks = self._create_blocks_from_roads(features.get("roads", []))
         if self.debug:
             print(f"Created {len(blocks)} blocks from road network")
 
-        # Convert all buildings, no minimum size filtering
+        # 2) Gather building polygons (no minimum area filter here)
         building_polygons = []
         for building in features.get("buildings", []):
             try:
-                # Always try to create polygon, regardless of size
                 poly = Polygon(building["coords"])
-                height = building.get("height", 5.0)  # Default height if not specified
-
+                height = building.get("height", 5.0)  # Default if missing
                 if poly.is_valid:
                     building_polygons.append((poly, height))
                 else:
@@ -51,43 +53,65 @@ class BlockCombiner:
         if self.debug:
             print(f"Processed {len(building_polygons)} valid building polygons")
 
-        # Create a union of all buildings for coverage checking
-        all_buildings = unary_union([poly for poly, _ in building_polygons])
-        if not all_buildings.is_valid:
-            all_buildings = make_valid(all_buildings)
+        # 3) Create a union of all buildings for intersection checks
+        if building_polygons:
+            all_buildings = unary_union([poly for (poly, _) in building_polygons])
+            if not all_buildings.is_valid:
+                all_buildings = make_valid(all_buildings)
+        else:
+            all_buildings = None
 
         combined_buildings = []
         default_height = 5.0
 
-        # Process each block
-        for block_idx, block in enumerate(blocks):
+        # 4) Process each block
+        for block_idx, block_geom in enumerate(blocks):
             try:
-                # Check for any building intersection, no matter how small
-                if block.intersects(all_buildings):
-                    # Find all buildings in this block
-                    block_heights = []
-                    for building_poly, height in building_polygons:
-                        if block.intersects(building_poly):
-                            intersection = block.intersection(building_poly)
-                            if intersection.area > 0:
-                                block_heights.append((height, intersection.area))
+                # If there are no buildings at all, or block doesn't intersect them, skip
+                if not all_buildings or not block_geom.intersects(all_buildings):
+                    continue
 
-                    # Get block height
-                    if block_heights:
-                        # Use height of largest building
-                        block_height = max(block_heights, key=lambda x: x[1])[0]
-                    else:
-                        block_height = default_height
+                # Find the largest building (by intersection area) that touches this block
+                block_heights = []
+                for (building_poly, bldg_height) in building_polygons:
+                    if block_geom.intersects(building_poly):
+                        intersection = block_geom.intersection(building_poly)
+                        if intersection.area > 0:
+                            block_heights.append((bldg_height, intersection.area))
 
-                    # Create slightly smaller block footprint
-                    block_shape = block.buffer(-0.1)
-                    if block_shape.is_valid:
-                        coords = list(block_shape.exterior.coords)[:-1]
-                        combined_buildings.append(
-                            {"coords": coords, "height": block_height, "is_block": True}
-                        )
-                        if self.debug:
-                            print(f"Added block {block_idx} with height {block_height}")
+                # If at least one building intersects, pick the largest intersection’s height
+                if block_heights:
+                    block_height = max(block_heights, key=lambda x: x[1])[0]
+                else:
+                    block_height = default_height
+
+                # [Add a slight buffer shrink, so roads remain visible]
+                block_shape = block_geom.buffer(-0.1)
+                if not block_shape.is_valid:
+                    block_shape = make_valid(block_shape)
+
+                if block_shape.is_valid and not block_shape.is_empty:
+                    coords = list(block_shape.exterior.coords)[:-1]
+
+                    # -----------------------------------------
+                    # [ADDED RANDOMIZATION SECTION]
+                    # Slight random factor for final block height
+                    rand_factor = random.uniform(0.85, 1.15)
+                    final_height = block_height * rand_factor
+
+                    # Randomly pick a style for the block's roof
+                    roof_style = random.choice(["flat", "sawtooth", "modern", "step"])
+                    # -----------------------------------------
+
+                    combined_buildings.append({
+                        "coords": coords,
+                        "height": final_height,
+                        "roof_style": roof_style,  # stored for SCAD generator
+                        "is_block": True
+                    })
+
+                    if self.debug:
+                        print(f"Block {block_idx} height ~ {final_height:.2f}, style={roof_style}")
 
             except Exception as e:
                 if self.debug:
@@ -101,7 +125,8 @@ class BlockCombiner:
 
     def _create_blocks_from_roads(self, roads):
         """
-        Create blocks from road network.
+        Use the road network to produce 'blocks' as polygons. We take each road,
+        buffer it by half its width, then subtract from the bounding area to get blocks.
         """
         try:
             road_polys = []
@@ -110,7 +135,8 @@ class BlockCombiner:
             for road in roads:
                 try:
                     line = LineString(road["coords"])
-                    buffered = line.buffer(road_width / 2)
+                    # Buffer by half the road width
+                    buffered = line.buffer(road_width * 0.5)
                     if buffered.is_valid:
                         road_polys.append(buffered)
                 except Exception as e:
@@ -125,18 +151,19 @@ class BlockCombiner:
             if not road_union.is_valid:
                 road_union = make_valid(road_union)
 
-            bounds = road_union.bounds
-            area = box(*bounds)
+            # bounding rectangle for union
+            minx, miny, maxx, maxy = road_union.bounds
+            area = box(minx, miny, maxx, maxy)
+
             blocks_area = area.difference(road_union)
 
-            if isinstance(blocks_area, MultiPolygon):
+            # May be multiple polygons if the bounding area was large
+            if blocks_area.is_empty:
+                return []
+            elif isinstance(blocks_area, MultiPolygon):
                 blocks = [poly for poly in blocks_area.geoms if poly.is_valid]
             else:
                 blocks = [blocks_area] if blocks_area.is_valid else []
-
-            # No minimum block size filtering
-            if self.debug:
-                print(f"Created {len(blocks)} blocks")
 
             return blocks
 

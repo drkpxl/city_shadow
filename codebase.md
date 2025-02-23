@@ -513,6 +513,7 @@ from .road_processor import RoadProcessor
 from .railway_processor import RailwayProcessor
 from .water_processor import WaterProcessor
 from .barrier_processor import create_barrier_union
+from.park_processor import ParkProcessor
 
 from ..geometry import GeometryUtils
 
@@ -529,7 +530,9 @@ class FeatureProcessor:
         self.road_proc = RoadProcessor(self.geometry, style_manager, debug=self.debug)
         self.rail_proc = RailwayProcessor(self.geometry, style_manager, debug=self.debug)
         self.water_proc = WaterProcessor(self.geometry, style_manager, debug=self.debug)
-
+        self.park_proc = ParkProcessor(self.geometry, style_manager, debug=self.debug)
+        
+        
     def process_features(self, geojson_data, size):
         """
         Parse the GeoJSON and gather features by category: water, roads, railways, buildings, etc.
@@ -547,6 +550,7 @@ class FeatureProcessor:
             "buildings": [],
             "bridges": [],
             "industrial": [],
+            "parks": []
         }
 
         # First pass: handle everything except industrial landuse
@@ -580,6 +584,10 @@ class FeatureProcessor:
             # Railways
             if "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
+                continue
+            # Parks or "green" landuse
+            if ("leisure" in props) or ("landuse" in props):
+                self.park_proc.process_park(feature, features, transform)
                 continue
 
         # Second pass: handle industrial landuse polygons
@@ -684,6 +692,50 @@ class IndustrialProcessor(BaseProcessor):
 
 ```
 
+# lib/feature_processor/park_processor.py
+
+```py
+# lib/feature_processor/park_processor.py
+from .base_processor import BaseProcessor
+
+class ParkProcessor(BaseProcessor):
+    """
+    Processes OSM features for 'leisure' areas and green 'landuse' types
+    (grass, forest, etc.) into a dedicated layer.
+    """
+
+    GREEN_LANDUSE_VALUES = {"grass", "forest", "meadow", "village_green", "farmland", "orchard"}
+    GREEN_LEISURE_VALUES = {"park", "garden", "golf_course", "recreation_ground", "pitch", "playground"}
+
+    def process_park(self, feature, features, transform):
+        """
+        Extract polygons that are either 'leisure' or 'landuse' in the 'green' family
+        and store them into the `features["parks"]` bucket for later extrusion.
+        """
+        props = feature.get("properties", {})
+        geometry_type = feature["geometry"]["type"]
+
+        # Identify if feature is in one of our 'green' categories
+        landuse = props.get("landuse", "").lower()
+        leisure = props.get("leisure", "").lower()
+
+        # If it's landuse in GREEN_LANDUSE_VALUES or leisure in GREEN_LEISURE_VALUES
+        if (landuse in self.GREEN_LANDUSE_VALUES) or (leisure in self.GREEN_LEISURE_VALUES):
+            # Extract raw coords
+            coords = self.geometry.extract_coordinates(feature)
+            if not coords:
+                return
+
+            # For polygons only: if it has at least 3 points
+            # (We can skip linestring “parks” or points)
+            if geometry_type in ["Polygon", "MultiPolygon"] and len(coords) >= 3:
+                # Apply your standard lat/lon -> XY transform
+                transformed = [transform(lon, lat) for lon, lat in coords]
+                # Store them so we can extrude later in scad_generator
+                features["parks"].append({"coords": transformed})
+
+```
+
 # lib/feature_processor/railway_processor.py
 
 ```py
@@ -737,7 +789,7 @@ class RoadProcessor(BaseProcessor):
             return
 
         # Bridge
-        if props.get("bridge") in ["yes", "true", "1"]:
+        if props.get("bridge") and props.get("bridge").lower() not in ["no", "false", "0"]:
             bridge_type = props.get("highway", "bridge")
             features["bridges"].append({"coords": transformed, "type": bridge_type})
             if self.debug:
@@ -1457,6 +1509,7 @@ class PreviewGenerator:
 
 ```py
 # lib/scad_generator.py
+
 from .geometry import GeometryUtils
 from .style.style_manager import StyleManager
 
@@ -1468,9 +1521,10 @@ class ScadGenerator:
 
     def generate_openscad(self, features, size, layer_specs):
         """
-        Generate complete OpenSCAD code for main model (excluding frame).
-        We 'union' buildings & bridges, then 'difference' roads/water/rail.
+        Generate complete OpenSCAD code for the main model (excluding frame).
+        We'll union buildings, parks, etc. and difference roads/water/rail.
         """
+
         scad = [
             f"""// Generated with Enhanced City Converter
 // Style: {self.style_manager.style['artistic_style']}
@@ -1486,9 +1540,12 @@ difference() {{
 
         // Bridges
         {self._generate_bridge_features(features['bridges'], layer_specs)}
+
+        // Parks
+        {self._generate_park_features(features.get('parks', []), layer_specs)}
     }}
 
-    // Subtractive features
+    // Subtractive features: roads, water, rail
     union() {{
         {self._generate_water_features(features['water'], layer_specs)}
         {self._generate_road_features(features['roads'], layer_specs)}
@@ -1496,10 +1553,11 @@ difference() {{
     }}
 }}"""
         ]
+
         return "\n".join(scad)
 
     def _generate_building_features(self, building_features, layer_specs):
-        """Generate OpenSCAD code for building features (unioned on top)"""
+        """Generate OpenSCAD code for building features (unioned on top)."""
         scad = []
         base_height = layer_specs["base"]["height"]
 
@@ -1511,21 +1569,23 @@ difference() {{
             building_height = building["height"]
             is_cluster = building.get("is_cluster", False)
             is_industrial = building.get("is_industrial", False)
+            is_block = building.get("is_block", False)
 
-            # Choose appropriate building type label for comments
-            building_type = (
-                "Industrial Building"
-                if is_industrial
-                else "Building Cluster" if is_cluster else "Building"
-            )
+            # [ADDED/CHANGED] Pass along 'roof_style' if present
+            roof_style = building.get("roof_style", None)
 
             details = self._generate_building_details(
-                points_str, building_height, is_cluster, is_industrial
+                points_str,
+                building_height,
+                is_cluster=is_cluster,
+                is_industrial=is_industrial,
+                is_block=is_block,
+                roof_style=roof_style
             )
 
             scad.append(
                 f"""
-    // {building_type} {i+1}
+    // Building {i+1}
     translate([0, 0, {base_height}]) {{
         {details}
     }}"""
@@ -1533,25 +1593,31 @@ difference() {{
 
         return "\n".join(scad)
 
-    def _generate_building_details(
-        self, points_str, height, is_cluster, is_industrial=False
-    ):
-        """Generate architectural details based on style and building type."""
+    def _generate_building_details(self, points_str, height, is_cluster=False,
+                                   is_industrial=False, is_block=False,
+                                   roof_style=None):
+        """
+        Generate architectural details based on style and building type.
+        """
+
         style = self.style_manager.style["artistic_style"]
         detail_level = self.style_manager.style["detail_level"]
 
-        # Industrial buildings get special treatment
-        if is_industrial:
-            return self._generate_industrial_details(
-                points_str, height, style, detail_level
-            )
+        # [ADDED for block roofs]
+        # If this building has 'is_block=True' and a 'roof_style', pick that style snippet.
+        if is_block and roof_style:
+            return self._generate_block_roof(points_str, height, roof_style)
 
-        # Simple extrusion for low detail or single buildings
+        # Industrial buildings
+        if is_industrial:
+            return self._generate_industrial_details(points_str, height, style, detail_level)
+
+        # If it's not a cluster or we have very low detail, do a simple extrusion
         if not is_cluster or detail_level < 0.5:
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
-        # Style-specific details for regular buildings
+        # Otherwise handle normal "modern"/"classic"/"minimal" styles for multi-building clusters
         if style == "modern":
             return f"""
     union() {{
@@ -1572,21 +1638,65 @@ difference() {{
                 offset(r=-0.5)
                     polygon([{points_str}]);
     }}"""
-        else:  # minimal
+        else:  # minimal or fallback
             return f"""linear_extrude(height={height}, convexity=2)
     polygon([{points_str}]);"""
 
+    # [ADDED new helper to handle block roofs]
+    def _generate_block_roof(self, points_str, height, roof_style):
+        """
+        For block-combine polygons, pick a roof style snippet based on 'roof_style'.
+        """
+        if roof_style == "flat":
+            return f"""linear_extrude(height={height}, convexity=2)
+    polygon([{points_str}]);"""
+
+        elif roof_style == "sawtooth":
+            return f"""
+    union() {{
+        linear_extrude(height={height * 0.8}, convexity=2)
+            polygon([{points_str}]);
+        translate([0, 0, {height * 0.8}])
+            linear_extrude(height={height * 0.2}, convexity=2)
+                offset(r=-1)
+                    polygon([{points_str}]);
+    }}"""
+
+        elif roof_style == "step":
+            return f"""
+    union() {{
+        linear_extrude(height={height * 0.7}, convexity=2)
+            polygon([{points_str}]);
+        translate([0, 0, {height * 0.7}])
+            linear_extrude(height={height * 0.3}, convexity=2)
+                offset(r=-0.8)
+                    polygon([{points_str}]);
+    }}"""
+
+        else:  # e.g. "modern"
+            return f"""
+    union() {{
+        linear_extrude(height={height}, convexity=2)
+            polygon([{points_str}]);
+        translate([0, 0, {height}])
+            linear_extrude(height=1.0, convexity=2)
+                offset(r=-1.5)
+                    polygon([{points_str}]);
+    }}"""
+
     def _generate_industrial_details(self, points_str, height, style, detail_level):
-        """Generate industrial-specific architectural details."""
+        """
+        Generate special extrusions for industrial buildings (with different roof shapes).
+        """
         if style == "modern":
-            # Modern industrial: Flat roof with mechanical details
+            # Modern industrial: flat roof + mechanical details
             return f"""
     union() {{
         // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
         
-        // Roof details (mechanical equipment, etc.)
+        // Roof detail
         translate([0, 0, {height}]) {{
             linear_extrude(height=1.2, convexity=2)
                 offset(r=-2)
@@ -1594,42 +1704,63 @@ difference() {{
         }}
     }}"""
         elif style == "classic":
-            # Classic industrial: Sawtooth roof pattern
+            # Classic industrial: sawtooth roof
             return f"""
     union() {{
-        // Main structure
         linear_extrude(height={height * 0.8}, convexity=2)
             polygon([{points_str}]);
-        
+
         // Sawtooth roof
         translate([0, 0, {height * 0.8}])
             linear_extrude(height={height * 0.2}, convexity=2)
                 offset(r=-1)
                     polygon([{points_str}]);
     }}"""
-        else:  # minimal
-            # Minimal industrial: Simple block with slight roof detail
+        else:
+            # minimal or fallback: block + slight roof edge
             return f"""
     union() {{
-        // Main structure
         linear_extrude(height={height}, convexity=2)
             polygon([{points_str}]);
         
-        // Simple roof edge
         translate([0, 0, {height - 0.5}])
             linear_extrude(height=0.5, convexity=2)
                 offset(r=-0.5)
                     polygon([{points_str}]);
     }}"""
 
+    def _generate_park_features(self, park_features, layer_specs):
+        """
+        Extrude 'parks' or green areas from (base_height + start_offset) up to thickness.
+        """
+        scad = []
+        base_height = layer_specs["base"]["height"]
+
+        park_start = layer_specs["parks"].get("start_offset", 0.2)
+        park_thickness = layer_specs["parks"].get("thickness", 0.4)
+
+        for i, park in enumerate(park_features):
+            coords = park.get("coords", [])
+            if len(coords) < 3:
+                continue
+            points_str = self.geometry.generate_polygon_points(coords)
+            if points_str:
+                scad.append(f"""
+        // Park {i+1}
+        translate([0, 0, {base_height + park_start}])
+            linear_extrude(height={park_thickness}, convexity=2)
+                polygon([{points_str}]);""")
+
+        return "\n".join(scad)
+
     def _generate_water_features(self, water_features, layer_specs):
-        """Generate OpenSCAD code for water features (subtractive)"""
+        """Generate OpenSCAD code for water features (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         water_depth = layer_specs["water"]["depth"]
 
         for i, water in enumerate(water_features):
-            coords = water.get("coords", water)
+            coords = water.get("coords", [])
             points_str = self.geometry.generate_polygon_points(coords)
             if points_str:
                 scad.append(
@@ -1643,7 +1774,7 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for roads (subtractive)"""
+        """Generate OpenSCAD code for roads (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
@@ -1654,15 +1785,13 @@ difference() {{
             is_parking = road.get("is_parking", False)
 
             if is_parking and len(coords) >= 3:
-                # Parking lot as polygon
+                # Parking as polygon
                 points_str = self.geometry.generate_polygon_points(coords)
             else:
                 # Road as buffered line
                 points_str = None
                 if len(coords) >= 2:
-                    points_str = self.geometry.generate_buffered_polygon(
-                        coords, road_width
-                    )
+                    points_str = self.geometry.generate_buffered_polygon(coords, road_width)
 
             if points_str:
                 scad.append(
@@ -1676,7 +1805,7 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_railway_features(self, railway_features, layer_specs):
-        """Generate OpenSCAD code for railways (subtractive)"""
+        """Generate OpenSCAD code for railways (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         railway_depth = layer_specs["railways"]["depth"]
@@ -1700,12 +1829,12 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_bridge_features(self, bridge_features, layer_specs):
-        """Generate OpenSCAD code for bridges with improved 3D printing support"""
+        """Generate OpenSCAD code for bridges with basic 3D-printing supports."""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = 2.0  # Height above base
-        bridge_thickness = 1  # Thickness for stability
-        support_width = 2.0  # Width of bridge supports
+        bridge_height = 2.0      # Height above the base
+        bridge_thickness = 1.0   # Bridge deck thickness
+        support_width = 2.0      # Support column radius
         road_width = layer_specs["roads"]["width"]
 
         for i, bridge in enumerate(bridge_features):
@@ -1722,12 +1851,12 @@ difference() {{
                     f"""
         // Bridge {i+1}
         union() {{
-            // Main bridge deck
+            // Bridge deck
             translate([0, 0, {base_height + bridge_height}])
                 linear_extrude(height={bridge_thickness}, convexity=2)
                     polygon([{points_str}]);
             
-            // Bridge supports
+            // Bridge supports at endpoints
             translate([{start_point[0]}, {start_point[1]}, {base_height}])
                 cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
             translate([{end_point[0]}, {end_point[1]}, {base_height}])
@@ -2060,12 +2189,13 @@ class ArtisticEffects:
 # lib/style/block_combiner.py
 
 ```py
-# lib/block_combiner.py
-from shapely.geometry import Polygon, MultiPolygon, box, LineString, mapping
-from shapely.ops import unary_union, polygonize
+# lib/style/block_combiner.py
+
+import random
+from shapely.geometry import Polygon, MultiPolygon, box, LineString
+from shapely.ops import unary_union
 from shapely.validation import make_valid
 from ..geometry import GeometryUtils
-from .style_manager import StyleManager
 
 
 class BlockCombiner:
@@ -2076,25 +2206,26 @@ class BlockCombiner:
 
     def combine_buildings_by_block(self, features):
         """
-        Fill each block that has any building coverage.
+        Fill each block that has any building coverage. For each block:
+          1) Compute a block-wide height based on the largest building in that block.
+          2) Slightly randomize the final height to avoid uniform extrusions.
+          3) Randomly pick a 'roof_style' so block roofs vary (flat, sawtooth, etc.).
         """
         if self.debug:
             print("\nStarting block combination process...")
             print(f"Number of input buildings: {len(features.get('buildings', []))}")
 
-        # Create blocks from road network
+        # 1) Create blocks from road network
         blocks = self._create_blocks_from_roads(features.get("roads", []))
         if self.debug:
             print(f"Created {len(blocks)} blocks from road network")
 
-        # Convert all buildings, no minimum size filtering
+        # 2) Gather building polygons (no minimum area filter here)
         building_polygons = []
         for building in features.get("buildings", []):
             try:
-                # Always try to create polygon, regardless of size
                 poly = Polygon(building["coords"])
-                height = building.get("height", 5.0)  # Default height if not specified
-
+                height = building.get("height", 5.0)  # Default if missing
                 if poly.is_valid:
                     building_polygons.append((poly, height))
                 else:
@@ -2113,43 +2244,65 @@ class BlockCombiner:
         if self.debug:
             print(f"Processed {len(building_polygons)} valid building polygons")
 
-        # Create a union of all buildings for coverage checking
-        all_buildings = unary_union([poly for poly, _ in building_polygons])
-        if not all_buildings.is_valid:
-            all_buildings = make_valid(all_buildings)
+        # 3) Create a union of all buildings for intersection checks
+        if building_polygons:
+            all_buildings = unary_union([poly for (poly, _) in building_polygons])
+            if not all_buildings.is_valid:
+                all_buildings = make_valid(all_buildings)
+        else:
+            all_buildings = None
 
         combined_buildings = []
         default_height = 5.0
 
-        # Process each block
-        for block_idx, block in enumerate(blocks):
+        # 4) Process each block
+        for block_idx, block_geom in enumerate(blocks):
             try:
-                # Check for any building intersection, no matter how small
-                if block.intersects(all_buildings):
-                    # Find all buildings in this block
-                    block_heights = []
-                    for building_poly, height in building_polygons:
-                        if block.intersects(building_poly):
-                            intersection = block.intersection(building_poly)
-                            if intersection.area > 0:
-                                block_heights.append((height, intersection.area))
+                # If there are no buildings at all, or block doesn't intersect them, skip
+                if not all_buildings or not block_geom.intersects(all_buildings):
+                    continue
 
-                    # Get block height
-                    if block_heights:
-                        # Use height of largest building
-                        block_height = max(block_heights, key=lambda x: x[1])[0]
-                    else:
-                        block_height = default_height
+                # Find the largest building (by intersection area) that touches this block
+                block_heights = []
+                for (building_poly, bldg_height) in building_polygons:
+                    if block_geom.intersects(building_poly):
+                        intersection = block_geom.intersection(building_poly)
+                        if intersection.area > 0:
+                            block_heights.append((bldg_height, intersection.area))
 
-                    # Create slightly smaller block footprint
-                    block_shape = block.buffer(-0.1)
-                    if block_shape.is_valid:
-                        coords = list(block_shape.exterior.coords)[:-1]
-                        combined_buildings.append(
-                            {"coords": coords, "height": block_height, "is_block": True}
-                        )
-                        if self.debug:
-                            print(f"Added block {block_idx} with height {block_height}")
+                # If at least one building intersects, pick the largest intersection’s height
+                if block_heights:
+                    block_height = max(block_heights, key=lambda x: x[1])[0]
+                else:
+                    block_height = default_height
+
+                # [Add a slight buffer shrink, so roads remain visible]
+                block_shape = block_geom.buffer(-0.1)
+                if not block_shape.is_valid:
+                    block_shape = make_valid(block_shape)
+
+                if block_shape.is_valid and not block_shape.is_empty:
+                    coords = list(block_shape.exterior.coords)[:-1]
+
+                    # -----------------------------------------
+                    # [ADDED RANDOMIZATION SECTION]
+                    # Slight random factor for final block height
+                    rand_factor = random.uniform(0.85, 1.15)
+                    final_height = block_height * rand_factor
+
+                    # Randomly pick a style for the block's roof
+                    roof_style = random.choice(["flat", "sawtooth", "modern", "step"])
+                    # -----------------------------------------
+
+                    combined_buildings.append({
+                        "coords": coords,
+                        "height": final_height,
+                        "roof_style": roof_style,  # stored for SCAD generator
+                        "is_block": True
+                    })
+
+                    if self.debug:
+                        print(f"Block {block_idx} height ~ {final_height:.2f}, style={roof_style}")
 
             except Exception as e:
                 if self.debug:
@@ -2163,7 +2316,8 @@ class BlockCombiner:
 
     def _create_blocks_from_roads(self, roads):
         """
-        Create blocks from road network.
+        Use the road network to produce 'blocks' as polygons. We take each road,
+        buffer it by half its width, then subtract from the bounding area to get blocks.
         """
         try:
             road_polys = []
@@ -2172,7 +2326,8 @@ class BlockCombiner:
             for road in roads:
                 try:
                     line = LineString(road["coords"])
-                    buffered = line.buffer(road_width / 2)
+                    # Buffer by half the road width
+                    buffered = line.buffer(road_width * 0.5)
                     if buffered.is_valid:
                         road_polys.append(buffered)
                 except Exception as e:
@@ -2187,18 +2342,19 @@ class BlockCombiner:
             if not road_union.is_valid:
                 road_union = make_valid(road_union)
 
-            bounds = road_union.bounds
-            area = box(*bounds)
+            # bounding rectangle for union
+            minx, miny, maxx, maxy = road_union.bounds
+            area = box(minx, miny, maxx, maxy)
+
             blocks_area = area.difference(road_union)
 
-            if isinstance(blocks_area, MultiPolygon):
+            # May be multiple polygons if the bounding area was large
+            if blocks_area.is_empty:
+                return []
+            elif isinstance(blocks_area, MultiPolygon):
                 blocks = [poly for poly in blocks_area.geoms if poly.is_valid]
             else:
                 blocks = [blocks_area] if blocks_area.is_valid else []
-
-            # No minimum block size filtering
-            if self.debug:
-                print(f"Created {len(blocks)} blocks")
 
             return blocks
 
@@ -2418,6 +2574,10 @@ class StyleManager:
             "water": {"depth": 3},
             "roads": {"depth": 0.4, "width": 2.0},
             "railways": {"depth": 0.6, "width": 1.5},
+            "parks": {
+                "start_offset": 0.2,  # top of base + 0.2
+                "thickness": 0.4
+            },
             "buildings": {"min_height": 2, "max_height": 6},
             "base": {"height": 10},
         }

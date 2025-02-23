@@ -7,6 +7,7 @@ from .road_processor import RoadProcessor
 from .railway_processor import RailwayProcessor
 from .water_processor import WaterProcessor
 from .barrier_processor import create_barrier_union
+from.park_processor import ParkProcessor
 
 from ..geometry import GeometryUtils
 
@@ -23,7 +24,9 @@ class FeatureProcessor:
         self.road_proc = RoadProcessor(self.geometry, style_manager, debug=self.debug)
         self.rail_proc = RailwayProcessor(self.geometry, style_manager, debug=self.debug)
         self.water_proc = WaterProcessor(self.geometry, style_manager, debug=self.debug)
-
+        self.park_proc = ParkProcessor(self.geometry, style_manager, debug=self.debug)
+        
+        
     def process_features(self, geojson_data, size):
         """
         Parse the GeoJSON and gather features by category: water, roads, railways, buildings, etc.
@@ -41,6 +44,7 @@ class FeatureProcessor:
             "buildings": [],
             "bridges": [],
             "industrial": [],
+            "parks": []
         }
 
         # First pass: handle everything except industrial landuse
@@ -74,6 +78,10 @@ class FeatureProcessor:
             # Railways
             if "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
+                continue
+            # Parks or "green" landuse
+            if ("leisure" in props) or ("landuse" in props):
+                self.park_proc.process_park(feature, features, transform)
                 continue
 
         # Second pass: handle industrial landuse polygons

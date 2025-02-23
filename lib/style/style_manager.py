@@ -32,6 +32,10 @@ class StyleManager:
             "water": {"depth": 3},
             "roads": {"depth": 0.4, "width": 2.0},
             "railways": {"depth": 0.6, "width": 1.5},
+            "parks": {
+                "start_offset": 0.2,  # top of base + 0.2
+                "thickness": 0.4
+            },
             "buildings": {"min_height": 2, "max_height": 6},
             "base": {"height": 10},
         }
