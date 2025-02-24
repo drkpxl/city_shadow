@@ -129,18 +129,18 @@ class Config:
             'height': 3            # The thickness of the base block; increasing this raises the entire model.
         },
         'bridges': {
-            'height': 2.0,         # How high above the base the bridge deck is placed.
+            'height': 1.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
-            'support_width':  {
-                'road': 2.0, # Diameter of the bridge support columns.
-                'rail': 2.0
+            'support_width': {
+                'road': 2.0,       # Diameter of road bridge support columns.
+                'rail': 2.5        # Diameter of rail bridge support columns.
             },
-            'min_size': 10.0,     # Minimum area (in m²) for a bridge to be recognized.
+            'min_size': 5.0,      # Minimum area (in m²) for a bridge to be recognized.
             'assumed_width': {
-                'road': 3.0, # Assumed width for bridges without explicit width data.
-                'rail': 2.0
+                'road': 3.0,       # Assumed width for road bridges without explicit width data.
+                'rail': 2.5        # Assumed width for rail bridges without explicit width data.
             }
-        }
+        }   
     }
 
 

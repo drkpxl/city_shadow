@@ -9,3 +9,13 @@ class BaseProcessor:
         self.geometry = geometry_utils
         self.style_manager = style_manager
         self.debug = debug
+        
+    def _log_debug(self, message: str) -> None:
+        """
+        Wrapper for debug logging.
+        
+        Args:
+            message: Debug message to log
+        """
+        if self.debug:
+            print(message)

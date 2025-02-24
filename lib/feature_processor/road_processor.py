@@ -4,6 +4,7 @@ from shapely.geometry import LineString, Polygon
 from .linear_processor import LinearFeatureProcessor
 from ..config import Config
 from ..geometry import GeometryUtils
+from .bridge_processor import BridgeProcessor
 
 class RoadProcessor(LinearFeatureProcessor):
     """
@@ -13,6 +14,10 @@ class RoadProcessor(LinearFeatureProcessor):
     
     FEATURE_TYPE = Config.FEATURE_TYPES['HIGHWAY']
     feature_category = 'roads'
+    
+    def __init__(self, geometry_utils, style_manager, debug=False):
+        super().__init__(geometry_utils, style_manager, debug)
+        self.bridge_processor = BridgeProcessor(geometry_utils, style_manager, debug)
 
     def process_road_or_bridge(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
         """
@@ -31,19 +36,47 @@ class RoadProcessor(LinearFeatureProcessor):
         type_multiplier = Config.get_road_width(road_type)
         actual_width = base_width * type_multiplier
         
-        # Process common road features with calculated width
-        self._process_linear_feature(
-            feature, 
-            features, 
-            transform,
-            width_override=actual_width,
-            additional_tags=["bridge"]  # Preserve bridge status
+        # Process road directly instead of calling process_linear_feature with incompatible parameters
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Skip tunnels
+        if self._is_tunnel(props):
+            self._log_debug(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
+            return
+
+        # Create feature dictionary with width
+        feature_data = {
+            "coords": transformed,
+            "type": props.get(self.FEATURE_TYPE, "unknown"),
+            "is_parking": False,
+            "width": actual_width
+        }
+
+        # Preserve bridge status if needed
+        if "bridge" in props:
+            feature_data["bridge"] = props["bridge"]
+
+        features[self.feature_category].append(feature_data)
+        
+        self._log_debug(
+            f"Added {self.FEATURE_TYPE} '{feature_data['type']}' with width {feature_data['width']:.1f}mm, {len(transformed)} points"
         )
         
         # Special bridge handling if needed
         if props.get(Config.FEATURE_TYPES['BRIDGE']):
-            self._process_bridge(feature, features, transform, props)
-
+            # Process as a road bridge using the shared bridge processor
+            self.bridge_processor.process_bridge(
+                feature, 
+                features, 
+                transform, 
+                bridge_type="road"
+            )
     def _process_linear_feature(
         self, 
         feature: Dict[str, Any], 

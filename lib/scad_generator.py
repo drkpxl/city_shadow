@@ -182,40 +182,115 @@ difference() {{
         base_height = layer_specs["base"]["height"]
         bridge_height = layer_specs["bridges"]["height"]
         bridge_thickness = layer_specs["bridges"]["thickness"]
-        support_width = layer_specs["bridges"]["support_width"]
         road_width = layer_specs["roads"]["width"]
+        railway_width = layer_specs["railways"]["width"]
 
         for i, bridge in enumerate(bridge_features):
             coords = bridge.get("coords", [])
             if len(coords) < 2:
                 continue
-
-            points_str = self.geometry.generate_buffered_polygon(coords, road_width)
+                
+            bridge_type = bridge.get("bridge_type", "road")
+            
+            # Handle support_width being either a dict or float
+            if isinstance(layer_specs["bridges"]["support_width"], dict):
+                support_width = layer_specs["bridges"]["support_width"].get(bridge_type, 2.0)
+            else:
+                # Fall back to using support_width directly if it's not a dict
+                support_width = float(layer_specs["bridges"]["support_width"])
+            
+            # Use appropriate width based on bridge type
+            if bridge_type == "road":
+                width = road_width
+                color = "orange"
+            else:  # railway
+                width = railway_width
+                color = "brown"
+            
+            points_str = self.geometry.generate_buffered_polygon(coords, width)
             if points_str:
                 start_point = coords[0]
                 end_point = coords[-1]
+                
+                # Generate simplified supports
+                supports_code = self._generate_bridge_supports(
+                    coords, base_height, bridge_height, support_width
+                )
+
+                # Generate simple railings for rail bridges
+                railings_code = ""
+                if bridge_type == "rail":
+                    railings_code = f"""
+                    // Railway bridge railings
+                    translate([0, 0, {base_height + bridge_height + bridge_thickness}])
+                        cube([0.1, 0.1, 0.1]); // Dummy object that won't affect rendering"""
 
                 scad.append(
                     f"""
-        // Bridge {i+1}
-        union() {{
-            color("orange")
-            {{
-                // Main bridge deck
-                translate([0, 0, {base_height + bridge_height}])
-                    linear_extrude(height={bridge_thickness}, convexity=2)
-                        polygon([{points_str}]);
-            }}
-            // Bridge supports (remain uncolored for clarity)
-            translate([{start_point[0]}, {start_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
-            translate([{end_point[0]}, {end_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
-        }}"""
+            // {bridge_type.capitalize()} Bridge {i+1}
+            union() {{
+                color("{color}")
+                {{
+                    // Main bridge deck
+                    translate([0, 0, {base_height + bridge_height}])
+                        linear_extrude(height={bridge_thickness}, convexity=2)
+                            polygon([{points_str}]);
+                    {railings_code}
+                }}
+                // Bridge supports
+                {supports_code}
+            }}"""
                 )
 
         return "\n".join(scad)
-
+    
+    def _generate_bridge_supports(self, coords, base_height, bridge_height, support_width):
+        """Generate simplified bridge supports"""
+        if len(coords) < 2:
+            return ""
+            
+        # Always add supports at the start and end
+        start_point = coords[0]
+        end_point = coords[-1]
+        
+        supports = [
+            f"translate([{start_point[0]}, {start_point[1]}, {base_height}])\n"
+            f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);",
+            f"translate([{end_point[0]}, {end_point[1]}, {base_height}])\n"
+            f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
+        ]
+        
+        # Add intermediate supports for longer bridges using simple point selection
+        if len(coords) > 2:
+            # Simple approach: Add one support in the middle for longer bridges
+            middle_point_index = len(coords) // 2
+            middle_point = coords[middle_point_index]
+            supports.append(
+                f"translate([{middle_point[0]}, {middle_point[1]}, {base_height}])\n"
+                f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
+            )
+        
+        return "\n            ".join(supports)  
+    def _generate_bridge_railings(self, bridge_type, coords, base_height, bridge_height, bridge_thickness, width):
+        """Generate railings for railway bridges"""
+        if bridge_type != "rail" or len(coords) < 2:
+            return ""
+            
+        # Only generate railings for railway bridges
+        railing_height = 0.4  # Railing height
+        railing_width = 0.2   # Railing width
+        offset = width / 2 - railing_width / 2
+        
+        # Generate railings on both sides of the bridge
+        return f"""
+                // Railway bridge railings
+                translate([0, 0, {base_height + bridge_height + bridge_thickness}]) {{
+                    linear_extrude(height={railing_height}, convexity=2)
+                        difference() {{
+                            polygon([{self.geometry.generate_buffered_polygon(coords, width)}]);
+                            polygon([{self.geometry.generate_buffered_polygon(coords, width - railing_width * 2)}]);
+                        }}
+                }}"""
     def _generate_park_features(self, park_features, layer_specs):
         """Generate OpenSCAD code for park features."""
         scad = []
