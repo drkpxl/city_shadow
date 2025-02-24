@@ -208,7 +208,6 @@ from .feature_processor.feature_processor import FeatureProcessor
 from .scad_generator import ScadGenerator
 from .style.style_manager import StyleManager
 
-
 class EnhancedCityConverter:
     def __init__(self, size_mm=200, max_height_mm=20, style_settings=None):
         self.size = size_mm
@@ -218,11 +217,9 @@ class EnhancedCityConverter:
         self.scad_generator = ScadGenerator(self.style_manager)
         self.debug = True
         self.debug_log = []
-
-        # Initialize layer specifications
         self.layer_specs = self.style_manager.get_default_layer_specs()
-
-        # ADDED FOR BRIDGES: store user values in layer_specs
+        
+        # Initialize bridge specs
         self.layer_specs["bridges"] = {
             "height": style_settings.get("bridge_height", 2.0),
             "thickness": style_settings.get("bridge_thickness", 1.0),
@@ -230,136 +227,96 @@ class EnhancedCityConverter:
         }
 
     def print_debug(self, *args):
-        """Log debug messages"""
         message = " ".join(str(arg) for arg in args)
         if self.debug:
             print(message)
             self.debug_log.append(message)
 
     def convert(self, input_file, output_file):
-        """Convert GeoJSON to separate OpenSCAD files for main model and frame"""
-        try:
-            # Read input file
-            with open(input_file) as f:
-                data = json.load(f)
-
-            # Process features
-            self.print_debug("\nProcessing features...")
-            features = self.feature_processor.process_features(data, self.size)
-
-            # Generate main model SCAD code
-            self.print_debug("\nGenerating main model OpenSCAD code...")
-            main_scad = self.scad_generator.generate_openscad(
-                features, self.size, self.layer_specs
-            )
-
-            # Generate frame SCAD code
-            self.print_debug("\nGenerating frame OpenSCAD code...")
-            frame_scad = self._generate_frame(self.size, self.max_height)
-
-            # Determine output filenames
-            main_file = output_file.replace(".scad", "_main.scad")
-            frame_file = output_file.replace(".scad", "_frame.scad")
-
-            # Write main model
-            with open(main_file, "w") as f:
-                f.write(main_scad)
-
-            # Write frame
-            with open(frame_file, "w") as f:
-                f.write(frame_scad)
-
-            self.print_debug(f"\nSuccessfully created main model: {main_file}")
-            self.print_debug(f"Successfully created frame: {frame_file}")
-            self.print_debug("Style settings used:")
-            for key, value in self.style_manager.style.items():
-                self.print_debug(f"  {key}: {value}")
-
-            # Write debug log if needed
-            if self.debug:
-                log_file = output_file + ".log"
-                with open(log_file, "w") as f:
-                    f.write("\n".join(self.debug_log))
-                self.print_debug(f"\nDebug log written to {log_file}")
-
-        except Exception as e:
-            print(f"Error: {str(e)}")
-            raise
+        """Standard conversion without preprocessing"""
+        with open(input_file) as f:
+            data = json.load(f)
+        self._process_data(data, output_file)
 
     def convert_preprocessed(self, input_file, output_file, preprocessor):
-        """Convert GeoJSON to OpenSCAD with preprocessing"""
+        """Conversion with preprocessing"""
+        with open(input_file) as f:
+            data = json.load(f)
+        processed_data = preprocessor.process_geojson(data)
+        self._process_data(processed_data, output_file)
+
+    def _process_data(self, data, output_file):
+        """Shared processing pipeline"""
         try:
-            # Read input file
-            with open(input_file) as f:
-                data = json.load(f)
-
-            # Preprocess the data
-            self.print_debug("\nPreprocessing GeoJSON data...")
-            processed_data = preprocessor.process_geojson(data)
-
             # Process features
-            self.print_debug("\nProcessing features...")
-            features = self.feature_processor.process_features(
-                processed_data, self.size
+            self._log_processing_start()
+            features = self.feature_processor.process_features(data, self.size)
+
+            # Generate SCAD components
+            main_scad, frame_scad = self._generate_scad_components(features)
+
+            # Write outputs
+            main_path, frame_path = self._write_output_files(
+                output_file, main_scad, frame_scad
             )
 
-            # Generate main model SCAD code
-            self.print_debug("\nGenerating main model OpenSCAD code...")
-            main_scad = self.scad_generator.generate_openscad(
-                features, self.size, self.layer_specs
-            )
-
-            # Generate frame SCAD code
-            self.print_debug("\nGenerating frame OpenSCAD code...")
-            frame_scad = self._generate_frame(self.size, self.max_height)
-
-            # Determine output filenames
-            main_file = output_file.replace(".scad", "_main.scad")
-            frame_file = output_file.replace(".scad", "_frame.scad")
-
-            # Write main model
-            with open(main_file, "w") as f:
-                f.write(main_scad)
-
-            # Write frame
-            with open(frame_file, "w") as f:
-                f.write(frame_scad)
-
-            self.print_debug(f"\nSuccessfully created main model: {main_file}")
-            self.print_debug(f"Successfully created frame: {frame_file}")
-            self.print_debug("Style settings used:")
-            for key, value in self.style_manager.style.items():
-                self.print_debug(f"  {key}: {value}")
-
-            # Write debug log if needed
-            if self.debug:
-                log_file = output_file + ".log"
-                with open(log_file, "w") as f:
-                    f.write("\n".join(self.debug_log))
-                self.print_debug(f"\nDebug log written to {log_file}")
+            # Final logging
+            self._log_success(main_path, frame_path)
+            self._write_debug_log(output_file)
 
         except Exception as e:
             print(f"Error: {str(e)}")
             raise
 
-    def _generate_frame(self, size, height):
-        """
-        Generate a frame that will fit around the main model.
-        The frame's inner dimensions match the main model size exactly,
-        with a 5mm border around all sides.
-        """
-        frame_size = size + 10  # Add 10mm total (5mm each side)
-        return f"""// Frame for city model
-// Outer size: {frame_size}mm x {frame_size}mm x {height}mm
-// Inner size: {size}mm x {size}mm x {height}mm
-// Frame width: 5mm
+    def _generate_scad_components(self, features):
+        """Generate both main and frame SCAD code"""
+        return (
+            self.scad_generator.generate_openscad(features, self.size, self.layer_specs),
+            self._generate_frame(self.size, self.max_height)
+        )
 
+    def _write_output_files(self, output_file, main_scad, frame_scad):
+        """Handle file writing operations"""
+        main_path = output_file.replace(".scad", "_main.scad")
+        frame_path = output_file.replace(".scad", "_frame.scad")
+
+        with open(main_path, "w") as f:
+            f.write(main_scad)
+        with open(frame_path, "w") as f:
+            f.write(frame_scad)
+
+        return main_path, frame_path
+
+    def _log_processing_start(self):
+        """Initial debug logging"""
+        self.print_debug("\nProcessing features...")
+        self.print_debug("\nGenerating main model OpenSCAD code...")
+
+    def _log_success(self, main_path, frame_path):
+        """Success state logging"""
+        self.print_debug(f"\nSuccessfully created main model: {main_path}")
+        self.print_debug(f"Successfully created frame: {frame_path}")
+        self.print_debug("Style settings used:")
+        for key, value in self.style_manager.style.items():
+            self.print_debug(f"  {key}: {value}")
+
+    def _write_debug_log(self, output_file):
+        """Write debug log if enabled"""
+        if self.debug:
+            log_path = output_file + ".log"
+            with open(log_path, "w") as f:
+                f.write("\n".join(self.debug_log))
+            self.print_debug(f"\nDebug log written to {log_path}")
+
+    def _generate_frame(self, size, height):
+        """Generate frame SCAD code (unchanged from original)"""
+        frame_size = size + 10
+        return f"""// Frame for city model
 difference() {{
     cube([{frame_size}, {frame_size}, {height}]);
     translate([5, 5, 0])
         cube([{size}, {size}, {height}]);
 }}"""
-
 ```
 
 # lib/feature_processor/__init__.py
@@ -728,6 +685,117 @@ class IndustrialProcessor(BaseProcessor):
 
 ```
 
+# lib/feature_processor/linear_processor.py
+
+```py
+# lib/feature_processor/linear_processor.py
+from .base_processor import BaseProcessor
+
+class LinearFeatureProcessor(BaseProcessor):
+    """
+    Base class for processing linear features like roads and railways.
+    Handles common tunnel checks and coordinate transformations.
+    """
+    
+    FEATURE_TYPE = None  # Must be set by subclasses
+    
+    def process_linear_feature(self, feature, features, transform, additional_tags=None):
+        """
+        Shared processing logic for linear features.
+        Args:
+            additional_tags: Extra properties to preserve (e.g., bridge status)
+        """
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Skip tunnels
+        if self._is_tunnel(props):
+            if self.debug:
+                print(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
+            return
+
+        # Create feature dictionary
+        feature_data = {
+            "coords": transformed,
+            "type": props.get(self.FEATURE_TYPE, "unknown"),
+            "is_parking": False,
+        }
+
+        # Preserve additional properties if specified
+        if additional_tags:
+            for tag in additional_tags:
+                if tag in props:
+                    feature_data[tag] = props[tag]
+
+        features[self.feature_category].append(feature_data)
+        
+        if self.debug:
+            print(f"Added {self.FEATURE_TYPE} '{feature_data['type']}', {len(transformed)} points")
+
+    def _is_tunnel(self, props):
+        """Check if the feature is a tunnel (common for roads/railways)"""
+        return props.get("tunnel") in ["yes", "true", "1"]
+
+# lib/feature_processor/road_processor.py
+from .linear_processor import LinearFeatureProcessor
+
+class RoadProcessor(LinearFeatureProcessor):
+    """Handles road and bridge features, inheriting core linear processing"""
+    
+    FEATURE_TYPE = "highway"
+    feature_category = "roads"
+
+    def process_road_or_bridge(self, feature, features, transform):
+        """Special handling for bridges"""
+        props = feature.get("properties", {})
+        
+        # First do common processing
+        super().process_linear_feature(
+            feature, 
+            features, 
+            transform,
+            additional_tags=["bridge"]  # Preserve bridge status
+        )
+        
+        # Special bridge handling
+        if props.get("bridge"):
+            coords = self.geometry.extract_coordinates(feature)
+            transformed = [transform(lon, lat) for lon, lat in coords]
+            features["bridges"].append({
+                "coords": transformed,
+                "type": props.get("highway", "bridge")
+            })
+
+    def process_parking(self, feature, features, transform):
+        """Parking-specific logic remains here"""
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) >= 3:
+            features[self.feature_category].append({
+                "coords": transformed,
+                "type": "parking",
+                "is_parking": True
+            })
+
+    def is_parking_area(self, props):
+        """Parking-specific check remains here"""
+        return (
+            props.get("amenity") == "parking"
+            or props.get("parking") == "surface"
+            or props.get("service") == "parking_aisle"
+        )
+
+```
+
 # lib/feature_processor/park_processor.py
 
 ```py
@@ -776,87 +844,89 @@ class ParkProcessor(BaseProcessor):
 
 ```py
 # lib/feature_processor/railway_processor.py
-from .base_processor import BaseProcessor
+from .linear_processor import LinearFeatureProcessor
 
-class RailwayProcessor(BaseProcessor):
+class RailwayProcessor(LinearFeatureProcessor):
+    """Handles railway features using base linear processing"""
+    
+    FEATURE_TYPE = "railway"
+    feature_category = "railways"
+
     def process_railway(self, feature, features, transform):
-        """Process a railway feature."""
-        props = feature.get("properties", {})
-        coords = self.geometry.extract_coordinates(feature)
-        if not coords:
-            return
-
-        # Skip tunnels
-        if props.get("tunnel") in ["yes", "true", "1"]:
-            if self.debug:
-                print(f"Skipping tunnel railway: {props.get('railway')}")
-            return
-
-        transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) >= 2:
-            features["railways"].append({"coords": transformed, "type": props.get("railway", "unknown")})
-            if self.debug:
-                print(f"Added railway '{props.get('railway', 'unknown')}', {len(transformed)} points")
-
+        """Process railway feature using base class logic"""
+        super().process_linear_feature(
+            feature,
+            features,
+            transform,
+            additional_tags=["service"]  # Preserve optional service tag
+        )
 ```
 
 # lib/feature_processor/road_processor.py
 
 ```py
 # lib/feature_processor/road_processor.py
-from .base_processor import BaseProcessor
+from .linear_processor import LinearFeatureProcessor
 
-class RoadProcessor(BaseProcessor):
+class RoadProcessor(LinearFeatureProcessor):
+    """Handles road and bridge features, inheriting core linear processing"""
+    
+    FEATURE_TYPE = "highway"
+    feature_category = "roads"
+
     def process_road_or_bridge(self, feature, features, transform):
-        """Handle a road or bridge feature."""
+        """Handle roads and bridges with specialized processing"""
         props = feature.get("properties", {})
+        
+        # Process common road features
+        super().process_linear_feature(
+            feature, 
+            features, 
+            transform,
+            additional_tags=["bridge"]  # Preserve bridge status
+        )
+        
+        # Special bridge handling
+        if props.get("bridge"):
+            self._process_bridge(feature, features, transform, props)
+
+    def _process_bridge(self, feature, features, transform, props):
+        """Handle bridge-specific processing"""
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
-        # Skip tunnels
-        if props.get("tunnel") in ["yes", "true", "1"]:
-            if self.debug:
-                print(f"Skipping tunnel road: {props.get('highway')}")
-            return
-
         transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) < 2:
-            return
-
-        # Bridge
-        if props.get("bridge") and props.get("bridge").lower() not in ["no", "false", "0"]:
-            bridge_type = props.get("highway", "bridge")
-            features["bridges"].append({"coords": transformed, "type": bridge_type})
+        if len(transformed) >= 2:
+            features["bridges"].append({
+                "coords": transformed,
+                "type": props.get("highway", "bridge")
+            })
             if self.debug:
-                print(f"Added bridge of type '{bridge_type}', {len(transformed)} points")
-        else:
-            # Regular road
-            road_type = props.get("highway", "unknown")
-            features["roads"].append({"coords": transformed, "type": road_type, "is_parking": False})
-            if self.debug:
-                print(f"Added road of type '{road_type}', {len(transformed)} points")
+                print(f"Added bridge of type '{props.get('highway', 'bridge')}'")
 
     def process_parking(self, feature, features, transform):
-        """Process a parking area."""
+        """Process parking areas as special road features"""
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
         transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) >= 3:  # polygon
-            features["roads"].append({"coords": transformed, "type": "parking", "is_parking": True})
+        if len(transformed) >= 3:  # Polygon check
+            features[self.feature_category].append({
+                "coords": transformed,
+                "type": "parking",
+                "is_parking": True
+            })
             if self.debug:
                 print(f"Added parking area with {len(transformed)} points")
 
     def is_parking_area(self, props):
-        """Check if feature is a parking area by OSM tags."""
-        return (
-            props.get("amenity") == "parking"
-            or props.get("parking") == "surface"
-            or props.get("service") == "parking_aisle"
+        """Check if feature represents a parking area"""
+        return any(
+            props.get(key) in ["parking", "surface", "parking_aisle"]
+            for key in ["amenity", "parking", "service"]
         )
-
 ```
 
 # lib/feature_processor/water_processor.py
@@ -3015,92 +3085,65 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Set view engine to EJS
+// Configuration setup
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
-
-// Serve static files
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static("uploads"));
 app.use("/outputs", express.static("outputs"));
-
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Define directories
-const uploadsDir = path.join(__dirname, "uploads");
-const outputsDir = path.join(__dirname, "outputs");
-
-// Ensure required directories exist
-[uploadsDir, outputsDir].forEach((dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir);
-  }
-});
-
-// Configure Multer storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = `${Date.now()}-${uuidv4()}`;
-    cb(null, `${uniqueSuffix}-${file.originalname}`);
+// File upload configuration
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: "uploads/",
+    filename: (req, file, cb) => {
+      const uniqueSuffix = `${Date.now()}-${uuidv4()}`;
+      cb(null, `${uniqueSuffix}-${file.originalname}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    ext === ".geojson" ? cb(null, true) : cb(new Error("Invalid file type"));
   },
 });
 
-// Only allow .geojson files
-const fileFilter = (req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  ext === ".geojson"
-    ? cb(null, true)
-    : cb(new Error("Invalid file type. Only .geojson files are allowed."));
-};
+// Argument configuration
+const OPTION_CONFIG = [
+  // Basic options
+  { bodyKey: "size", cliFlag: "--size" },
+  { bodyKey: "height", cliFlag: "--height" },
+  { bodyKey: "style", cliFlag: "--style" },
+  { bodyKey: "detail", cliFlag: "--detail" },
+  { bodyKey: "merge-distance", cliFlag: "--merge-distance" },
+  { bodyKey: "cluster-size", cliFlag: "--cluster-size" },
+  { bodyKey: "height-variance", cliFlag: "--height-variance" },
+  { bodyKey: "road-width", cliFlag: "--road-width" },
+  { bodyKey: "water-depth", cliFlag: "--water-depth" },
+  { bodyKey: "min-building-area", cliFlag: "--min-building-area" },
 
-const upload = multer({ storage, fileFilter });
+  // Bridge options
+  { bodyKey: "bridge-height", cliFlag: "--bridge-height" },
+  { bodyKey: "bridge-thickness", cliFlag: "--bridge-thickness" },
+  { bodyKey: "support-width", cliFlag: "--support-width" },
 
-// Shared argument processing functions
-const processBasicOptions = (body, args) => {
-  const numberOptions = [
-    "size",
-    "height",
-    "detail",
-    "merge-distance",
-    "cluster-size",
-    "height-variance",
-    "road-width",
-    "water-depth",
-    "min-building-area",
-  ];
+  // Preprocessing options
+  { bodyKey: "preprocess", cliFlag: "--preprocess", isFlag: true },
+  { bodyKey: "crop-distance", cliFlag: "--crop-distance" },
+  {
+    bodyKey: "crop-bbox",
+    process: (value) => {
+      const bbox = value.split(",").map((coord) => Number(coord.trim()));
+      return bbox.length === 4 && bbox.every((num) => !isNaN(num))
+        ? ["--crop-bbox", ...bbox.map(String)]
+        : [];
+    },
+  },
 
-  numberOptions.forEach((opt) => {
-    if (body[opt]) args.push(`--${opt}`, body[opt]);
-  });
-
-  if (body.style) args.push("--style", body.style);
-  if (body.debug === "on") args.push("--debug");
-};
-
-const processBridgeOptions = (body, args) => {
-  const bridgeOptions = ["bridge-height", "bridge-thickness", "support-width"];
-  bridgeOptions.forEach((opt) => {
-    if (body[opt]) args.push(`--${opt}`, body[opt]);
-  });
-};
-
-const processPreprocessingOptions = (body, args) => {
-  if (body.preprocess === "on") args.push("--preprocess");
-  if (body["crop-distance"])
-    args.push("--crop-distance", body["crop-distance"]);
-
-  if (body["crop-bbox"]) {
-    const bbox = body["crop-bbox"]
-      .split(",")
-      .map((coord) => coord.trim())
-      .map(Number);
-    if (bbox.length === 4 && bbox.every((num) => !isNaN(num))) {
-      args.push("--crop-bbox", ...bbox.map(String));
-    }
-  }
-};
+  // Debug flag
+  { bodyKey: "debug", cliFlag: "--debug", isFlag: true },
+];
 
 const buildPythonArgs = (inputFile, outputFile, body) => {
   const args = [
@@ -3109,9 +3152,18 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
     outputFile,
   ];
 
-  processBasicOptions(body, args);
-  processBridgeOptions(body, args);
-  processPreprocessingOptions(body, args);
+  OPTION_CONFIG.forEach((config) => {
+    const value = body[config.bodyKey];
+    if (value === undefined || value === "") return;
+
+    if (config.process) {
+      args.push(...config.process(value));
+    } else if (config.isFlag) {
+      if (value === "on") args.push(config.cliFlag);
+    } else {
+      args.push(config.cliFlag, value);
+    }
+  });
 
   return args;
 };
@@ -3120,12 +3172,8 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
 app.get("/", (req, res) => res.render("index"));
 
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
-  if (!req.file) {
-    return res
-      .status(400)
-      .json({ error: "No valid .geojson file was uploaded." });
-  }
-  res.json({ filePath: path.join(__dirname, req.file.path) });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  res.json({ filePath: req.file.path });
 });
 
 const runPythonProcess = (args) => {
@@ -3134,45 +3182,29 @@ const runPythonProcess = (args) => {
     let stdoutData = "";
     let stderrData = "";
 
-    pythonProcess.stdout.on("data", (data) => {
-      stdoutData += data.toString();
-    });
-
-    pythonProcess.stderr.on("data", (data) => {
-      stderrData += data.toString();
-    });
+    pythonProcess.stdout.on("data", (data) => (stdoutData += data));
+    pythonProcess.stderr.on("data", (data) => (stderrData += data));
 
     pythonProcess.on("close", (code) => {
-      if (code !== 0) {
-        console.error("Python process exited with code", code);
-        console.error(stderrData);
-        reject(stderrData);
-        return;
-      }
-      resolve({ stdout: stdoutData, stderr: stderrData });
+      code !== 0
+        ? reject(stderrData)
+        : resolve({ stdout: stdoutData, stderr: stderrData });
     });
   });
 };
 
 app.post("/preview", async (req, res) => {
-  const uploadedFile = req.body.uploadedFile;
-  if (!uploadedFile) {
-    return res.status(400).json({ error: "No uploaded file provided." });
-  }
-
-  const outputBase = `preview-${Date.now()}-${uuidv4()}`;
-  const outputScad = path.join(outputsDir, `${outputBase}.scad`);
-
   try {
-    const args = buildPythonArgs(uploadedFile, outputScad, req.body);
+    const outputBase = `preview-${Date.now()}-${uuidv4()}`;
+    const outputScad = path.join("outputs", `${outputBase}.scad`);
 
-    const { stdout, stderr } = await runPythonProcess(args);
+    const args = buildPythonArgs(req.body.uploadedFile, outputScad, req.body);
+
+    await runPythonProcess(args);
 
     res.json({
       previewMain: `/outputs/${outputBase}_preview_main.png`,
       previewFrame: `/outputs/${outputBase}_preview_frame.png`,
-      stdout,
-      stderr,
     });
   } catch (error) {
     res.status(500).json({ error: error.toString() });
@@ -3180,40 +3212,31 @@ app.post("/preview", async (req, res) => {
 });
 
 app.post("/render", async (req, res) => {
-  const uploadedFile = req.body.uploadedFile;
-  if (!uploadedFile) {
-    return res.status(400).json({ error: "No uploaded file provided." });
-  }
-
-  const outputBase = `output-${Date.now()}-${uuidv4()}`;
-  const outputPath = path.join(outputsDir, `${outputBase}.scad`);
-
   try {
-    const args = buildPythonArgs(uploadedFile, outputPath, req.body);
-    const { stdout, stderr } = await runPythonProcess(args);
+    const outputBase = `output-${Date.now()}-${uuidv4()}`;
+    const outputPath = path.join("outputs", `${outputBase}.scad`);
 
-    const response = {
+    const args = buildPythonArgs(req.body.uploadedFile, outputPath, req.body);
+
+    await runPythonProcess(args);
+
+    res.json({
       mainScad: `/outputs/${outputBase}_main.scad`,
       frameScad: `/outputs/${outputBase}_frame.scad`,
-      logFile: `/outputs/${outputBase}.scad.log`,
-      stdout,
-      stderr,
       stlFiles: {
         mainStl: `/outputs/${outputBase}_main.stl`,
         frameStl: `/outputs/${outputBase}_frame.stl`,
       },
-    };
-
-    res.json(response);
+    });
   } catch (error) {
     res.status(500).json({ error: error.toString() });
   }
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+// Server startup
+app.listen(port, () =>
+  console.log(`Server running on port ${port}\nhttp://localhost:${port}`)
+);
 
 ```
 
