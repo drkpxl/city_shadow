@@ -132,7 +132,8 @@ class Config:
             'height': 2.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
             'support_width': 2.0, # Diameter of the bridge support columns.
-            'min_size': 10.0       # Minimum area (in m²) for a bridge to be recognized.
+            'min_size': 10.0,     # Minimum area (in m²) for a bridge to be recognized.
+            'assumed_width': 3     # Assumed width for bridges with no explicit width tag.
         }
     }
 

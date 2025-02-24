@@ -329,7 +329,9 @@ class Config:
         'bridges': {
             'height': 2.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
-            'support_width': 2.0   # Diameter of the bridge support columns.
+            'support_width': 2.0, # Diameter of the bridge support columns.
+            'min_size': 10.0,     # Minimum area (in m²) for a bridge to be recognized.
+            'assumed_width': 3     # Assumed width for bridges with no explicit width tag.
         }
     }
 
@@ -824,8 +826,8 @@ class FeatureProcessor:
                 self.road_proc.process_road_or_bridge(feature, features, transform)
             elif "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
-            elif ("leisure" in props) or ("landuse" in props):
-                self.park_proc.process_park(feature, features, transform)
+            #elif ("leisure" in props) or ("landuse" in props):
+            #    self.park_proc.process_park(feature, features, transform)
 
         # Store features in style manager
         self.style_manager.set_current_features(features)
