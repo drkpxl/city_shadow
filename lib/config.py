@@ -128,6 +128,8 @@ class Config:
         'base': {
             'height': 3            # The thickness of the base block; increasing this raises the entire model.
         },
+# Update the DEFAULT_LAYER_SPECS section in Config class to enhance bridge handling
+
         'bridges': {
             'height': 1.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
@@ -135,12 +137,18 @@ class Config:
                 'road': 2.0,       # Diameter of road bridge support columns.
                 'rail': 2.5        # Diameter of rail bridge support columns.
             },
-            'min_size': 5.0,      # Minimum area (in m²) for a bridge to be recognized.
+            'support_spacing': {
+                'water': 10.0,     # Spacing between supports over water (in mm)
+                'land': 5.0        # Spacing between supports over land (in mm)
+            },
+            'min_size': 6.0,      # Minimum area (in m²) for a bridge to be recognized.
             'assumed_width': {
                 'road': 3.0,       # Assumed width for road bridges without explicit width data.
                 'rail': 2.5        # Assumed width for rail bridges without explicit width data.
-            }
-        }   
+            },
+            'railing_height': 0.28, # Height of railway bridge railings.
+            'railing_width': 0.22   # Width of railway bridge railings.
+        }
     }
 
 

@@ -327,18 +327,18 @@ class Config:
             'height': 3            # The thickness of the base block; increasing this raises the entire model.
         },
         'bridges': {
-            'height': 2.0,         # How high above the base the bridge deck is placed.
+            'height': 1.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
-            'support_width':  {
-                'road': 2.0, # Diameter of the bridge support columns.
-                'rail': 2.0
+            'support_width': {
+                'road': 2.0,       # Diameter of road bridge support columns.
+                'rail': 2.5        # Diameter of rail bridge support columns.
             },
-            'min_size': 10.0,     # Minimum area (in m²) for a bridge to be recognized.
+            'min_size': 5.0,      # Minimum area (in m²) for a bridge to be recognized.
             'assumed_width': {
-                'road': 3.0, # Assumed width for bridges without explicit width data.
-                'rail': 2.0
+                'road': 3.0,       # Assumed width for road bridges without explicit width data.
+                'rail': 2.5        # Assumed width for rail bridges without explicit width data.
             }
-        }
+        }   
     }
 
 
@@ -724,7 +724,153 @@ class BaseProcessor:
         self.geometry = geometry_utils
         self.style_manager = style_manager
         self.debug = debug
+        
+    def _log_debug(self, message: str) -> None:
+        """
+        Wrapper for debug logging.
+        
+        Args:
+            message: Debug message to log
+        """
+        if self.debug:
+            print(message)
+```
 
+# lib/feature_processor/bridge_processor.py
+
+```py
+# lib/feature_processor/bridge_processor.py
+from typing import Dict, Any, List, Optional, Tuple
+from shapely.geometry import LineString, Point
+from .base_processor import BaseProcessor
+from ..config import Config
+from ..geometry import GeometryUtils
+from typing import Dict, Any, List, Optional, Tuple
+from shapely.geometry import LineString, Point
+from .base_processor import BaseProcessor
+from ..config import Config
+from ..geometry import GeometryUtils
+
+class BridgeProcessor(BaseProcessor):
+    """
+    Unified processor for both road and railway bridges.
+    
+    This class handles the shared processing logic for all bridge types,
+    providing consistent treatment for various bridge structures.
+    """
+    
+    def __init__(self, geometry_utils, style_manager, debug=False):
+        super().__init__(geometry_utils, style_manager, debug)
+        self.geometry = geometry_utils
+    
+    def process_bridge(
+        self, 
+        feature: Dict[str, Any], 
+        features: Dict[str, list], 
+        transform,
+        bridge_type: str = "road"
+    ) -> None:
+        """
+        Process a bridge feature with type-specific settings.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+            bridge_type: Type of bridge ("road" or "rail")
+        """
+        props = feature.get("properties", {})
+        
+        # Skip if not a bridge
+        if not self._is_bridge(props):
+            return
+            
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords or len(coords) < 2:
+            return
+            
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        
+        # Calculate bridge area and minimum size
+        bridge_specs = self.style_manager.get_default_layer_specs()['bridges']
+        bridge_area = self._calculate_bridge_area(transformed, bridge_type)
+        min_bridge_size = bridge_specs['min_size']
+        
+        # Only process if it meets the minimum size requirement
+        if bridge_area >= min_bridge_size:
+            features["bridges"].append({
+                "coords": transformed,
+                "type": self._get_bridge_feature_type(props, bridge_type),
+                "bridge_type": bridge_type,
+                "height": bridge_specs['height'],
+                "thickness": bridge_specs['thickness'],
+                "support_width": bridge_specs['support_width'][bridge_type]
+            })
+            
+            self._log_debug(
+                f"Added {bridge_type} bridge with area {bridge_area:.1f}m² " +
+                f"and feature type '{self._get_bridge_feature_type(props, bridge_type)}'"
+            )
+    
+    def _is_bridge(self, props: Dict[str, Any]) -> bool:
+        """
+        Check if the feature is marked as a bridge.
+        
+        Args:
+            props: Feature properties
+            
+        Returns:
+            bool: True if the feature is a bridge
+        """
+        return props.get(Config.FEATURE_TYPES['BRIDGE']) in ["yes", "true", "1"]
+    
+    def _get_bridge_feature_type(self, props: Dict[str, Any], bridge_type: str) -> str:
+        """
+        Get the specific feature type for the bridge.
+        
+        Args:
+            props: Feature properties
+            bridge_type: Type of bridge ("road" or "rail")
+            
+        Returns:
+            str: Specific feature type
+        """
+        if bridge_type == "road":
+            return props.get(Config.FEATURE_TYPES['HIGHWAY'], "bridge")
+        elif bridge_type == "rail":
+            return props.get(Config.FEATURE_TYPES['RAILWAY'], "rail_bridge")
+        else:
+            return "bridge"
+    
+    def _calculate_bridge_area(self, coords: List[List[float]], bridge_type: str) -> float:
+        """
+        Calculate the approximate area of a bridge based on its coordinates.
+        
+        Args:
+            coords: List of coordinate pairs
+            bridge_type: Type of bridge ("road" or "rail")
+            
+        Returns:
+            float: Approximate area in square meters
+        """
+        if len(coords) < 2:
+            return 0.0
+            
+        # Calculate the length of the bridge (distance between first and last point)
+        line = LineString(coords)
+        length = line.length
+        
+        # Calculate the width using bridge-type-specific width
+        bridge_specs = self.style_manager.get_default_layer_specs()['bridges']
+        width = bridge_specs['assumed_width'][bridge_type]
+        
+        # Approximate area as length * width
+        return length * width
+    
+    def _log_debug(self, message: str) -> None:
+        """Wrapper for debug logging."""
+        if self.debug:
+            print(message)
 ```
 
 # lib/feature_processor/building_processor.py
@@ -1333,6 +1479,7 @@ class ParkProcessor(BaseProcessor):
 from typing import Dict, Any, Optional
 from .linear_processor import LinearFeatureProcessor
 from ..config import Config
+from .bridge_processor import BridgeProcessor
 
 class RailwayProcessor(LinearFeatureProcessor):
     """
@@ -1343,6 +1490,10 @@ class RailwayProcessor(LinearFeatureProcessor):
     FEATURE_TYPE = Config.FEATURE_TYPES['RAILWAY']
     feature_category = 'railways'
 
+    def __init__(self, geometry_utils, style_manager, debug=False):
+        super().__init__(geometry_utils, style_manager, debug)
+        self.bridge_processor = BridgeProcessor(geometry_utils, style_manager, debug)
+
     def process_railway(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
         """
         Process railway feature using base class logic with railway-specific settings.
@@ -1352,71 +1503,54 @@ class RailwayProcessor(LinearFeatureProcessor):
             features: Dictionary of feature collections to update
             transform: Coordinate transformation function
         """
+        props = feature.get("properties", {})
+        
         # Get railway specifications from config
         railway_specs = self.style_manager.get_default_layer_specs()['railways']
         
-        # Process using base class with railway width
-        self._process_linear_feature(
-            feature,
-            features,
-            transform,
-            width_override=railway_specs['width'],
-            additional_tags=["service"]  # Preserve service type
-        )
-        
-    def _process_linear_feature(
-        self, 
-        feature: Dict[str, Any], 
-        features: Dict[str, list],
-        transform,
-        width_override: Optional[float] = None,
-        additional_tags: Optional[list] = None
-    ) -> None:
-        """
-        Enhanced linear feature processing with railway-specific handling.
-        
-        Args:
-            feature: GeoJSON feature to process
-            features: Dictionary of feature collections to update
-            transform: Coordinate transformation function
-            width_override: Optional specific width to use
-            additional_tags: Optional additional properties to preserve
-        """
-        props = feature.get("properties", {})
-        
-        # Skip if tunnel
+        # Process the feature as a railway
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Skip tunnels
         if self._is_tunnel(props):
             self._log_debug(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
             return
             
-        coords = self.geometry.extract_coordinates(feature)
-        if not coords or len(coords) < 2:
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
             return
 
-        transformed = [transform(lon, lat) for lon, lat in coords]
-        
+        # Create railway feature with width
         feature_data = {
             "coords": transformed,
             "type": props.get(self.FEATURE_TYPE, "rail"),
-            "width": width_override or self.style_manager.get_default_layer_specs()['railways']['width']
+            "width": railway_specs['width']
         }
 
-        # Add additional properties if specified
-        if additional_tags:
-            for tag in additional_tags:
-                if tag in props:
-                    feature_data[tag] = props[tag]
+        # Add service tag if present
+        additional_tags = ["service", "bridge"]
+        for tag in additional_tags:
+            if tag in props:
+                feature_data[tag] = props[tag]
 
+        # Add to features collection
         features[self.feature_category].append(feature_data)
         
         self._log_debug(
             f"Added {self.FEATURE_TYPE} '{feature_data['type']}' with width {feature_data['width']:.1f}mm"
         )
-
-    def _log_debug(self, message: str) -> None:
-        """Wrapper for debug logging."""
-        if self.debug:
-            print(message)
+        
+        # Special bridge handling
+        if props.get(Config.FEATURE_TYPES['BRIDGE']):
+            # Process as a rail bridge
+            self.bridge_processor.process_bridge(
+                feature, 
+                features, 
+                transform, 
+                bridge_type="rail"
+            )
 ```
 
 # lib/feature_processor/road_processor.py
@@ -1428,6 +1562,7 @@ from shapely.geometry import LineString, Polygon
 from .linear_processor import LinearFeatureProcessor
 from ..config import Config
 from ..geometry import GeometryUtils
+from .bridge_processor import BridgeProcessor
 
 class RoadProcessor(LinearFeatureProcessor):
     """
@@ -1437,6 +1572,10 @@ class RoadProcessor(LinearFeatureProcessor):
     
     FEATURE_TYPE = Config.FEATURE_TYPES['HIGHWAY']
     feature_category = 'roads'
+    
+    def __init__(self, geometry_utils, style_manager, debug=False):
+        super().__init__(geometry_utils, style_manager, debug)
+        self.bridge_processor = BridgeProcessor(geometry_utils, style_manager, debug)
 
     def process_road_or_bridge(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
         """
@@ -1455,19 +1594,47 @@ class RoadProcessor(LinearFeatureProcessor):
         type_multiplier = Config.get_road_width(road_type)
         actual_width = base_width * type_multiplier
         
-        # Process common road features with calculated width
-        self._process_linear_feature(
-            feature, 
-            features, 
-            transform,
-            width_override=actual_width,
-            additional_tags=["bridge"]  # Preserve bridge status
+        # Process road directly instead of calling process_linear_feature with incompatible parameters
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Skip tunnels
+        if self._is_tunnel(props):
+            self._log_debug(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
+            return
+
+        # Create feature dictionary with width
+        feature_data = {
+            "coords": transformed,
+            "type": props.get(self.FEATURE_TYPE, "unknown"),
+            "is_parking": False,
+            "width": actual_width
+        }
+
+        # Preserve bridge status if needed
+        if "bridge" in props:
+            feature_data["bridge"] = props["bridge"]
+
+        features[self.feature_category].append(feature_data)
+        
+        self._log_debug(
+            f"Added {self.FEATURE_TYPE} '{feature_data['type']}' with width {feature_data['width']:.1f}mm, {len(transformed)} points"
         )
         
         # Special bridge handling if needed
         if props.get(Config.FEATURE_TYPES['BRIDGE']):
-            self._process_bridge(feature, features, transform, props)
-
+            # Process as a road bridge using the shared bridge processor
+            self.bridge_processor.process_bridge(
+                feature, 
+                features, 
+                transform, 
+                bridge_type="road"
+            )
     def _process_linear_feature(
         self, 
         feature: Dict[str, Any], 
@@ -2397,40 +2564,115 @@ difference() {{
         base_height = layer_specs["base"]["height"]
         bridge_height = layer_specs["bridges"]["height"]
         bridge_thickness = layer_specs["bridges"]["thickness"]
-        support_width = layer_specs["bridges"]["support_width"]
         road_width = layer_specs["roads"]["width"]
+        railway_width = layer_specs["railways"]["width"]
 
         for i, bridge in enumerate(bridge_features):
             coords = bridge.get("coords", [])
             if len(coords) < 2:
                 continue
-
-            points_str = self.geometry.generate_buffered_polygon(coords, road_width)
+                
+            bridge_type = bridge.get("bridge_type", "road")
+            
+            # Handle support_width being either a dict or float
+            if isinstance(layer_specs["bridges"]["support_width"], dict):
+                support_width = layer_specs["bridges"]["support_width"].get(bridge_type, 2.0)
+            else:
+                # Fall back to using support_width directly if it's not a dict
+                support_width = float(layer_specs["bridges"]["support_width"])
+            
+            # Use appropriate width based on bridge type
+            if bridge_type == "road":
+                width = road_width
+                color = "orange"
+            else:  # railway
+                width = railway_width
+                color = "brown"
+            
+            points_str = self.geometry.generate_buffered_polygon(coords, width)
             if points_str:
                 start_point = coords[0]
                 end_point = coords[-1]
+                
+                # Generate simplified supports
+                supports_code = self._generate_bridge_supports(
+                    coords, base_height, bridge_height, support_width
+                )
+
+                # Generate simple railings for rail bridges
+                railings_code = ""
+                if bridge_type == "rail":
+                    railings_code = f"""
+                    // Railway bridge railings
+                    translate([0, 0, {base_height + bridge_height + bridge_thickness}])
+                        cube([0.1, 0.1, 0.1]); // Dummy object that won't affect rendering"""
 
                 scad.append(
                     f"""
-        // Bridge {i+1}
-        union() {{
-            color("orange")
-            {{
-                // Main bridge deck
-                translate([0, 0, {base_height + bridge_height}])
-                    linear_extrude(height={bridge_thickness}, convexity=2)
-                        polygon([{points_str}]);
-            }}
-            // Bridge supports (remain uncolored for clarity)
-            translate([{start_point[0]}, {start_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
-            translate([{end_point[0]}, {end_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
-        }}"""
+            // {bridge_type.capitalize()} Bridge {i+1}
+            union() {{
+                color("{color}")
+                {{
+                    // Main bridge deck
+                    translate([0, 0, {base_height + bridge_height}])
+                        linear_extrude(height={bridge_thickness}, convexity=2)
+                            polygon([{points_str}]);
+                    {railings_code}
+                }}
+                // Bridge supports
+                {supports_code}
+            }}"""
                 )
 
         return "\n".join(scad)
-
+    
+    def _generate_bridge_supports(self, coords, base_height, bridge_height, support_width):
+        """Generate simplified bridge supports"""
+        if len(coords) < 2:
+            return ""
+            
+        # Always add supports at the start and end
+        start_point = coords[0]
+        end_point = coords[-1]
+        
+        supports = [
+            f"translate([{start_point[0]}, {start_point[1]}, {base_height}])\n"
+            f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);",
+            f"translate([{end_point[0]}, {end_point[1]}, {base_height}])\n"
+            f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
+        ]
+        
+        # Add intermediate supports for longer bridges using simple point selection
+        if len(coords) > 2:
+            # Simple approach: Add one support in the middle for longer bridges
+            middle_point_index = len(coords) // 2
+            middle_point = coords[middle_point_index]
+            supports.append(
+                f"translate([{middle_point[0]}, {middle_point[1]}, {base_height}])\n"
+                f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
+            )
+        
+        return "\n            ".join(supports)  
+    def _generate_bridge_railings(self, bridge_type, coords, base_height, bridge_height, bridge_thickness, width):
+        """Generate railings for railway bridges"""
+        if bridge_type != "rail" or len(coords) < 2:
+            return ""
+            
+        # Only generate railings for railway bridges
+        railing_height = 0.4  # Railing height
+        railing_width = 0.2   # Railing width
+        offset = width / 2 - railing_width / 2
+        
+        # Generate railings on both sides of the bridge
+        return f"""
+                // Railway bridge railings
+                translate([0, 0, {base_height + bridge_height + bridge_thickness}]) {{
+                    linear_extrude(height={railing_height}, convexity=2)
+                        difference() {{
+                            polygon([{self.geometry.generate_buffered_polygon(coords, width)}]);
+                            polygon([{self.geometry.generate_buffered_polygon(coords, width - railing_width * 2)}]);
+                        }}
+                }}"""
     def _generate_park_features(self, park_features, layer_specs):
         """Generate OpenSCAD code for park features."""
         scad = []

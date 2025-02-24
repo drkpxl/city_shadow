@@ -177,57 +177,51 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_bridge_features(self, bridge_features, layer_specs):
-        """Generate OpenSCAD code for bridges with improved 3D printing support"""
+        """Generate OpenSCAD code for bridges with improved 3D printing support and railings"""
         scad = []
         base_height = layer_specs["base"]["height"]
         bridge_height = layer_specs["bridges"]["height"]
         bridge_thickness = layer_specs["bridges"]["thickness"]
-        road_width = layer_specs["roads"]["width"]
-        railway_width = layer_specs["railways"]["width"]
-
+        
         for i, bridge in enumerate(bridge_features):
             coords = bridge.get("coords", [])
             if len(coords) < 2:
                 continue
                 
             bridge_type = bridge.get("bridge_type", "road")
+            crosses_water = bridge.get("crosses_water", False)
+            needs_railings = bridge.get("needs_railings", False)
             
-            # Handle support_width being either a dict or float
-            if isinstance(layer_specs["bridges"]["support_width"], dict):
-                support_width = layer_specs["bridges"]["support_width"].get(bridge_type, 2.0)
-            else:
-                # Fall back to using support_width directly if it's not a dict
-                support_width = float(layer_specs["bridges"]["support_width"])
+            # Get bridge-type-specific properties
+            support_width = bridge.get("support_width", 2.0)
             
-            # Use appropriate width based on bridge type
+            # Determine width based on bridge type
             if bridge_type == "road":
-                width = road_width
+                width = layer_specs["roads"]["width"]
                 color = "orange"
             else:  # railway
-                width = railway_width
+                width = layer_specs["railways"]["width"]
                 color = "brown"
             
             points_str = self.geometry.generate_buffered_polygon(coords, width)
             if points_str:
-                start_point = coords[0]
-                end_point = coords[-1]
-                
-                # Generate simplified supports
+                # Generate appropriate supports based on whether bridge crosses water
                 supports_code = self._generate_bridge_supports(
-                    coords, base_height, bridge_height, support_width
+                    coords, base_height, bridge_height, support_width, crosses_water
                 )
 
-                # Generate simple railings for rail bridges
+                # Generate railings if needed (for railway bridges)
                 railings_code = ""
-                if bridge_type == "rail":
-                    railings_code = f"""
-                    // Railway bridge railings
-                    translate([0, 0, {base_height + bridge_height + bridge_thickness}])
-                        cube([0.1, 0.1, 0.1]); // Dummy object that won't affect rendering"""
-
+                if needs_railings:
+                    railings_code = self._generate_bridge_railings(
+                        bridge_type, coords, base_height, bridge_height, 
+                        bridge_thickness, width
+                    )
+                
+                # Create the full bridge code
                 scad.append(
                     f"""
-            // {bridge_type.capitalize()} Bridge {i+1}
+            // {bridge_type.capitalize()} Bridge {i+1} {"(crosses water)" if crosses_water else ""}
             union() {{
                 color("{color}")
                 {{
@@ -243,9 +237,9 @@ difference() {{
                 )
 
         return "\n".join(scad)
-    
-    def _generate_bridge_supports(self, coords, base_height, bridge_height, support_width):
-        """Generate simplified bridge supports"""
+
+    def _generate_bridge_supports(self, coords, base_height, bridge_height, support_width, crosses_water):
+        """Generate simplified bridge supports with appropriate spacing based on water crossing"""
         if len(coords) < 2:
             return ""
             
@@ -260,37 +254,61 @@ difference() {{
             f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
         ]
         
-        # Add intermediate supports for longer bridges using simple point selection
-        if len(coords) > 2:
-            # Simple approach: Add one support in the middle for longer bridges
-            middle_point_index = len(coords) // 2
-            middle_point = coords[middle_point_index]
-            supports.append(
-                f"translate([{middle_point[0]}, {middle_point[1]}, {base_height}])\n"
-                f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
-            )
+        # For water crossings, add fewer intermediate supports
+        # For non-water crossings or short bridges, add more supports
+        support_spacing = 10.0 if crosses_water else 5.0
         
-        return "\n            ".join(supports)  
+        # Create a LineString from coords to measure length and interpolate points
+        from shapely.geometry import LineString
+        line = LineString(coords)
+        length = line.length
+        
+        # Add intermediate supports
+        if length > support_spacing:
+            num_supports = max(1, int(length / support_spacing) - 1)
+            for i in range(1, num_supports + 1):
+                fraction = i / (num_supports + 1)
+                point = line.interpolate(fraction, normalized=True)
+                x, y = point.x, point.y
+                supports.append(
+                    f"translate([{x}, {y}, {base_height}])\n"
+                    f"    cylinder(h={bridge_height}, r={support_width/2}, $fn=8);"
+                )
+        
+        return "\n            ".join(supports)
+
     def _generate_bridge_railings(self, bridge_type, coords, base_height, bridge_height, bridge_thickness, width):
         """Generate railings for railway bridges"""
         if bridge_type != "rail" or len(coords) < 2:
             return ""
             
-        # Only generate railings for railway bridges
-        railing_height = 0.4  # Railing height
-        railing_width = 0.2   # Railing width
+        # Define railing parameters
+        railing_height = 1.0  # Railing height
+        railing_width = 0.3   # Railing width
         offset = width / 2 - railing_width / 2
         
         # Generate railings on both sides of the bridge
+        railing_points_left = self.geometry.generate_offset_line(coords, offset)
+        railing_points_right = self.geometry.generate_offset_line(coords, -offset)
+        
+        if not railing_points_left or not railing_points_right:
+            return ""
+        
         return f"""
-                // Railway bridge railings
-                translate([0, 0, {base_height + bridge_height + bridge_thickness}]) {{
-                    linear_extrude(height={railing_height}, convexity=2)
-                        difference() {{
-                            polygon([{self.geometry.generate_buffered_polygon(coords, width)}]);
-                            polygon([{self.geometry.generate_buffered_polygon(coords, width - railing_width * 2)}]);
-                        }}
-                }}"""
+                    // Railway bridge railings
+                    translate([0, 0, {base_height + bridge_height + bridge_thickness}]) {{
+                        // Left railing
+                        color("gray")
+                        linear_extrude(height={railing_height}, convexity=2)
+                            polygon([{railing_points_left}]);
+                        
+                        // Right railing
+                        color("gray")
+                        linear_extrude(height={railing_height}, convexity=2)
+                            polygon([{railing_points_right}]);
+                    }}"""
+    
+    
     def _generate_park_features(self, park_features, layer_specs):
         """Generate OpenSCAD code for park features."""
         scad = []

@@ -137,3 +137,121 @@ class GeometryUtils:
             area -= xy_points[j][0] * xy_points[i][1]
 
         return abs(area) / 2.0
+
+    def generate_offset_line(self, points, offset):
+        """
+        Generate a line offset from the original line by the specified distance.
+        Used for bridge railings and other parallel structures.
+        
+        Args:
+            points: Original line points
+            offset: Distance to offset (positive for left, negative for right)
+            
+        Returns:
+            str: String representation of polygon points for OpenSCAD
+        """
+        if len(points) < 2:
+            return None
+        
+        offset_points = []
+        
+        for i in range(len(points) - 1):
+            p1, p2 = points[i], points[i + 1]
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            length = sqrt(dx * dx + dy * dy)
+            
+            if length < 0.001:
+                continue
+                
+            # Calculate perpendicular vector
+            nx = -dy / length * abs(offset)
+            ny = dx / length * abs(offset)
+            
+            # Adjust direction based on offset sign
+            if offset < 0:
+                nx, ny = -nx, -ny
+                
+            # Add offset point
+            offset_points.append([p1[0] + nx, p1[1] + ny])
+            
+            # Add last point for last segment
+            if i == len(points) - 2:
+                offset_points.append([p2[0] + nx, p2[1] + ny])
+        
+        if len(offset_points) < 2:
+            return None
+            
+        # Create railing with width
+        railing_width = 0.3  # Width of the railing
+        
+        # Calculate perpendicular points to give the railing thickness
+        final_points = []
+        
+        for i in range(len(offset_points)):
+            p = offset_points[i]
+            
+            # For first or last point, calculate perpendicular using the connecting segment
+            if i == 0:
+                next_p = offset_points[i+1]
+                dx = next_p[0] - p[0]
+                dy = next_p[1] - p[1]
+            elif i == len(offset_points) - 1:
+                prev_p = offset_points[i-1]
+                dx = p[0] - prev_p[0]
+                dy = p[1] - prev_p[1]
+            else:
+                # For middle points, use average direction
+                prev_p = offset_points[i-1]
+                next_p = offset_points[i+1]
+                dx1 = p[0] - prev_p[0]
+                dy1 = p[1] - prev_p[1]
+                dx2 = next_p[0] - p[0]
+                dy2 = next_p[1] - p[1]
+                dx = (dx1 + dx2) / 2
+                dy = (dy1 + dy2) / 2
+            
+            # Normalize and calculate perpendicular
+            length = sqrt(dx * dx + dy * dy)
+            if length < 0.001:
+                continue
+                
+            nx = -dy / length * railing_width / 2
+            ny = dx / length * railing_width / 2
+            
+            # Add both sides of the railing
+            final_points.append([p[0] + nx, p[1] + ny])
+        
+        # Add points in reverse order to complete the polygon
+        for i in range(len(offset_points) - 1, -1, -1):
+            p = offset_points[i]
+            
+            if i == 0:
+                next_p = offset_points[i+1]
+                dx = next_p[0] - p[0]
+                dy = next_p[1] - p[1]
+            elif i == len(offset_points) - 1:
+                prev_p = offset_points[i-1]
+                dx = p[0] - prev_p[0]
+                dy = p[1] - prev_p[1]
+            else:
+                prev_p = offset_points[i-1]
+                next_p = offset_points[i+1]
+                dx1 = p[0] - prev_p[0]
+                dy1 = p[1] - prev_p[1]
+                dx2 = next_p[0] - p[0]
+                dy2 = next_p[1] - p[1]
+                dx = (dx1 + dx2) / 2
+                dy = (dy1 + dy2) / 2
+            
+            length = sqrt(dx * dx + dy * dy)
+            if length < 0.001:
+                continue
+                
+            nx = -dy / length * railing_width / 2
+            ny = dx / length * railing_width / 2
+            
+            final_points.append([p[0] - nx, p[1] - ny])
+        
+        # Format as polygon points string
+        return ", ".join(f"[{p[0]:.3f}, {p[1]:.3f}]" for p in final_points)

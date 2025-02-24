@@ -1,4 +1,4 @@
-# file: feature_processor.py
+# file: lib/feature_processor/feature_processor.py
 
 from shapely.geometry import box
 from .building_processor import BuildingProcessor
@@ -8,6 +8,7 @@ from .railway_processor import RailwayProcessor
 from .water_processor import WaterProcessor
 from .barrier_processor import create_barrier_union
 from .park_processor import ParkProcessor
+from .bridge_processor import BridgeProcessor
 from ..geometry import GeometryUtils
 
 class FeatureProcessor:
@@ -23,11 +24,13 @@ class FeatureProcessor:
         self.rail_proc = RailwayProcessor(self.geometry, style_manager, debug=self.debug)
         self.water_proc = WaterProcessor(self.geometry, style_manager, debug=self.debug)
         self.park_proc = ParkProcessor(self.geometry, style_manager, debug=self.debug)
+        # Create a shared bridge processor that can be used by both road and rail processors
+        self.bridge_proc = BridgeProcessor(self.geometry, style_manager, debug=self.debug)
         
     def process_features(self, geojson_data, size):
         """
         Parse the GeoJSON and gather features by category.
-        Updated to better handle industrial areas.
+        Updated to better handle industrial areas and detect implicit bridges.
         """
         # Create lat/lon -> model transform
         transform = self.geometry.create_coordinate_transformer(geojson_data["features"], size)
@@ -72,6 +75,9 @@ class FeatureProcessor:
         # Store features in style manager
         self.style_manager.set_current_features(features)
 
+        # Second pass: detect implicit bridges (roads/rails crossing water)
+        self.bridge_proc.detect_implicit_bridges(features)
+
         # Debug summary
         if self.debug:
             print(f"\nProcessed feature counts:")
@@ -82,6 +88,11 @@ class FeatureProcessor:
                     areas = sum(1 for x in items if "landuse_type" in x)
                     print(f"    - Industrial buildings: {buildings}")
                     print(f"    - Industrial areas: {areas}")
+                elif cat == "bridges":
+                    explicit = sum(1 for x in items if not x.get("is_implicit", False))
+                    implicit = sum(1 for x in items if x.get("is_implicit", False))
+                    print(f"    - Explicit bridges: {explicit}")
+                    print(f"    - Implicit bridges (detected): {implicit}")
 
         # Create barrier union and merge buildings
         barrier_union = create_barrier_union(
