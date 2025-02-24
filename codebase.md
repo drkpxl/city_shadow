@@ -480,9 +480,9 @@ class Config:
     #   • barrier_buffer: Extra spacing around barriers (e.g., roads or water) used during merging.
     # Tuning these values alters how aggressively small features merge into clusters.
     PROCESSING_SETTINGS: Dict[str, Any] = {
-        'area_threshold': 200,  # Increasing this value causes more buildings to merge into clusters.
+        'area_threshold': 100,  # Increasing this value causes more buildings to merge into clusters.
         'min_cluster_size': 2,  # Fewer clusters will form if this number is raised.
-        'max_cluster_size': 7,  # Was 10, Prevents clusters from becoming excessively large.
+        'max_cluster_size': 4,  # Was 10, Prevents clusters from becoming excessively large.
         'barrier_buffer': 1.0,  # A larger buffer prevents merging across barriers.
     }
 
@@ -826,8 +826,8 @@ class FeatureProcessor:
                 self.road_proc.process_road_or_bridge(feature, features, transform)
             elif "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
-            #elif ("leisure" in props) or ("landuse" in props):
-            #    self.park_proc.process_park(feature, features, transform)
+            elif ("leisure" in props) or ("landuse" in props):
+                self.park_proc.process_park(feature, features, transform)
 
         # Store features in style manager
         self.style_manager.set_current_features(features)
@@ -1419,6 +1419,7 @@ from typing import Dict, Any, List, Optional
 from shapely.geometry import LineString, Polygon
 from .linear_processor import LinearFeatureProcessor
 from ..config import Config
+from ..geometry import GeometryUtils
 
 class RoadProcessor(LinearFeatureProcessor):
     """
@@ -1533,18 +1534,58 @@ class RoadProcessor(LinearFeatureProcessor):
 
         transformed = [transform(lon, lat) for lon, lat in coords]
         if len(transformed) >= 2:
-            # Get bridge settings from config
-            bridge_specs = self.style_manager.get_default_layer_specs()['bridges']
+            # Calculate bridge area
+            bridge_area = self._calculate_bridge_area(transformed)
+            min_bridge_size = self.style_manager.get_default_layer_specs()['bridges']['min_size']
+
+            # Only process as a bridge if it meets the minimum size requirement
+            if bridge_area >= min_bridge_size:
+                # Get bridge settings from config
+                bridge_specs = self.style_manager.get_default_layer_specs()['bridges']
+                
+                features["bridges"].append({
+                    "coords": transformed,
+                    "type": props.get(self.FEATURE_TYPE, "bridge"),
+                    "height": bridge_specs['height'],
+                    "thickness": bridge_specs['thickness'],
+                    "support_width": bridge_specs['support_width']
+                })
+                
+                self._log_debug(f"Added bridge of type '{props.get(self.FEATURE_TYPE, 'bridge')}' with area {bridge_area:.1f}m²")
+            else:
+                # Process as a regular road if the bridge is too small
+                self._log_debug(f"Skipping small bridge with area {bridge_area:.1f}m² (min size: {min_bridge_size}m²)")
+                self._process_linear_feature(
+                    feature, 
+                    features, 
+                    transform,
+                    width_override=self.style_manager.get_default_layer_specs()['roads']['width'],
+                    additional_tags=[]
+                )
+
+    def _calculate_bridge_area(self, coords: List[List[float]]) -> float:
+        """
+        Calculate the approximate area of a bridge based on its coordinates.
+        
+        Args:
+            coords: List of coordinate pairs
             
-            features["bridges"].append({
-                "coords": transformed,
-                "type": props.get(self.FEATURE_TYPE, "bridge"),
-                "height": bridge_specs['height'],
-                "thickness": bridge_specs['thickness'],
-                "support_width": bridge_specs['support_width']
-            })
-            
-            self._log_debug(f"Added bridge of type '{props.get(self.FEATURE_TYPE, 'bridge')}'")
+        Returns:
+            float: Approximate area in square meters
+        """
+        if len(coords) < 3:
+            return 0.0
+
+        # Calculate the length of the bridge (distance between first and last point)
+        start_point = coords[0]
+        end_point = coords[-1]
+        length = GeometryUtils().calculate_distance(start_point, end_point)
+
+        # Calculate the width using the road width from config
+        width = self.style_manager.get_default_layer_specs()['roads']['width']
+
+        # Approximate area as length * width
+        return length * width
 
     def process_parking(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
         """

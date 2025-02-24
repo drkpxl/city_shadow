@@ -88,6 +88,11 @@ difference() {{
         scad = []
         base_height = layer_specs["base"]["height"]
         water_depth = layer_specs["water"]["depth"]
+        # Get park specifications to calculate full extrusion height
+        park_specs = layer_specs["parks"]
+        park_offset = park_specs.get("start_offset", 0.2)
+        park_thickness = park_specs.get("thickness", 0.4)
+        water_extrude_height = water_depth + park_offset + park_thickness + 0.1
 
         for i, water in enumerate(water_features):
             coords = water.get("coords", water)
@@ -99,13 +104,13 @@ difference() {{
         translate([0, 0, {base_height - water_depth}])
             color("blue")
             {{
-                linear_extrude(height={water_depth + 0.1}, convexity=2)
+                linear_extrude(height={water_extrude_height}, convexity=2)
                     polygon([{points_str}]);
             }}"""
                 )
 
         return "\n".join(scad)
-
+    
     def _generate_road_features(self, road_features, layer_specs):
         """Generate OpenSCAD code for road features (subtractive)"""
         scad = []

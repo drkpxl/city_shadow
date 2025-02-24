@@ -282,9 +282,9 @@ class Config:
     #   • barrier_buffer: Extra spacing around barriers (e.g., roads or water) used during merging.
     # Tuning these values alters how aggressively small features merge into clusters.
     PROCESSING_SETTINGS: Dict[str, Any] = {
-        'area_threshold': 200,  # Increasing this value causes more buildings to merge into clusters.
+        'area_threshold': 100,  # Increasing this value causes more buildings to merge into clusters.
         'min_cluster_size': 2,  # Fewer clusters will form if this number is raised.
-        'max_cluster_size': 7,  # Was 10, Prevents clusters from becoming excessively large.
+        'max_cluster_size': 4,  # Was 10, Prevents clusters from becoming excessively large.
         'barrier_buffer': 1.0,  # A larger buffer prevents merging across barriers.
     }
 
