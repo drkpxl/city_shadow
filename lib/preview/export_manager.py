@@ -8,7 +8,7 @@ class ExportManager:
         self.openscad_path = openscad_path
         self.export_quality = {
             "fn": 256,
-            "fa": 2,
+            "fa": 12,
             "fs": 0.2,
         }
 

@@ -74,7 +74,7 @@ class Config:
         'height_variance': 0.2,
         'detail_level': 1.0,
         'artistic_style': 'modern',
-        'min_building_area': 600.0
+        'min_building_area': 1000.0
     }
 
     # List of allowed artistic styles.
@@ -282,10 +282,10 @@ class Config:
     #   • barrier_buffer: Extra spacing around barriers (e.g., roads or water) used during merging.
     # Tuning these values alters how aggressively small features merge into clusters.
     PROCESSING_SETTINGS: Dict[str, Any] = {
-        'area_threshold': 100,  # Increasing this value causes more buildings to merge into clusters.
+        'area_threshold': 500,  # Increasing this value causes more buildings to merge into clusters.
         'min_cluster_size': 2,  # Fewer clusters will form if this number is raised.
-        'max_cluster_size': 4,  # Was 10, Prevents clusters from becoming excessively large.
-        'barrier_buffer': 1.0,  # A larger buffer prevents merging across barriers.
+        'max_cluster_size': 6,  # Was 10, Prevents clusters from becoming excessively large.
+        'barrier_buffer': 0.5,  # Was 1 A larger buffer prevents merging across barriers.
     }
 
     # -----------------------------------------------------------------------------
