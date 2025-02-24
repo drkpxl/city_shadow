@@ -150,8 +150,9 @@
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
       -->
+        <!-- Add to views/index.ejs, inside the log-container div -->
         <div class="log-container">
-          <h4>Live Log</h4>
+          <h4>Live Log <button id="clearLogBtn" class="btn btn-sm btn-secondary float-right">Clear Log</button></h4>
           <div id="liveLog"></div>
         </div>
 
@@ -166,6 +167,10 @@
   </div>
 
   <script>
+    // Clear log button
+    $("#clearLogBtn").on("click", function () {
+      $("#liveLog").empty();
+    });
     // Debounce function to limit how often a function can be called
     function debounce(func, wait) {
       let timeout;
@@ -219,8 +224,14 @@
           }
         },
         error: function (err) {
-          console.error("Preview update error:", err);
-          updateLog("Error generating preview:\n" + JSON.stringify(err));
+          console.error("Error:", err);
+          let errorMessage = "An error occurred: ";
+          if (err.responseJSON && err.responseJSON.error) {
+            errorMessage += err.responseJSON.error;
+          } else {
+            errorMessage += err.statusText || "Unknown error";
+          }
+          updateLog(errorMessage, "error");
         }
       });
     }
@@ -231,11 +242,14 @@
       logContainer.scrollTop(logContainer[0].scrollHeight);
     }
 
-    // Function to append new log entries and auto-scroll
-    function updateLog(text) {
-      var logContainer = $("#liveLog");
-      logContainer.append(text + "\n"); // Append new log entries
-      scrollToBottom(); // Auto-scroll to bottom
+    // Update the updateLog function
+    function updateLog(message, level = 'info') {
+      const logContainer = $("#liveLog");
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = $("<div>").addClass(`log-entry log-${level}`)
+        .text(`[${timestamp}] ${message}`);
+      logContainer.append(logEntry);
+      scrollToBottom();
     }
 
     // Create debounced version of updatePreview with 2 second delay
@@ -272,6 +286,12 @@
     $(".live-preview").on("change keyup", function () {
       debouncedUpdatePreview();
     });
+
+    // Scroll to bottom
+    function scrollToBottom() {
+      const logContainer = $("#liveLog");
+      logContainer.scrollTop(logContainer[0].scrollHeight);
+    }
 
     // Handle final render button click
     $("#renderBtn").on("click", function () {

@@ -82,3 +82,27 @@ body {
   color: #7f8c8d;
   text-transform: uppercase;
 }
+
+/* Add to public/css/style.css */
+.log-container {
+  margin-top: 20px;
+  background-color: #1e1e1e;
+  border-radius: 4px;
+  padding: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.9em;
+}
+
+.log-entry {
+  margin: 2px 0;
+  padding: 4px;
+  border-left: 3px solid transparent;
+  white-space: pre-wrap; /* Ensure text wraps */
+  word-break: break-word; /* Break long words */
+}
+
+.log-info { color: #cfcfcf; border-color: #4a90e2; }
+.log-warning { color: #ffd700; border-color: #ffd700; }
+.log-error { color: #ff4444; border-color: #ff4444; }
