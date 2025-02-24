@@ -66,8 +66,8 @@ class FeatureProcessor:
                 self.road_proc.process_road_or_bridge(feature, features, transform)
             elif "railway" in props:
                 self.rail_proc.process_railway(feature, features, transform)
-            #elif ("leisure" in props) or ("landuse" in props):
-            #    self.park_proc.process_park(feature, features, transform)
+            elif ("leisure" in props) or ("landuse" in props):
+                self.park_proc.process_park(feature, features, transform)
 
         # Store features in style manager
         self.style_manager.set_current_features(features)
