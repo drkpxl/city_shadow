@@ -20,10 +20,10 @@ uploads/
 ```py
 #!/usr/bin/env python3
 import argparse
+import sys
 from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
 from lib.preview.openscad_integration import OpenSCADIntegration
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -83,7 +83,7 @@ def main():
         default=600.0,
         help="Minimum building footprint area in m^2 (default: 600)",
     )
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("--debug", action="store_true", help="Enable detailed debug output")
 
     # Bridge parameters
     parser.add_argument(
@@ -126,7 +126,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        # Initialize style settings
+        # Prepare style settings; detailed logs are only enabled if --debug is passed.
         style_settings = {
             "artistic_style": args.style,
             "detail_level": args.detail,
@@ -139,58 +139,52 @@ def main():
             "support_width": args.support_width,
         }
 
-        # Create converter instance
+        # Create the converter and explicitly set debug based on the flag.
         converter = EnhancedCityConverter(
             size_mm=args.size, max_height_mm=args.height, style_settings=style_settings
         )
-
-        # Update feature specifications
+        converter.debug = args.debug  # When --debug is not passed, debug is False.
         converter.layer_specs["roads"]["width"] = args.road_width
         converter.layer_specs["water"]["depth"] = args.water_depth
-        converter.debug = args.debug
 
-        # Preprocess if requested
+        # Process input data (with optional preprocessing)
         if args.preprocess:
             if not (args.crop_distance or args.crop_bbox):
-                parser.error(
-                    "When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified"
-                )
-
+                parser.error("When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified")
             preprocessor = GeoJSONPreprocessor(
                 bbox=args.crop_bbox, distance_meters=args.crop_distance
             )
             preprocessor.debug = args.debug
-
-            # Process and pass the data directly to converter
-            converter.convert_preprocessed(
-                args.input_json, args.output_scad, preprocessor
-            )
+            converter.convert_preprocessed(args.input_json, args.output_scad, preprocessor)
         else:
-            # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
-        # Set up OpenSCAD integration
+
+        # Print a concise summary of processed features.
+        print("\nConversion complete. Processed feature counts:", flush=True)
+        features = converter.style_manager.current_features
+        for category, items in features.items():
+            print(f"  {category}: {len(items)}", flush=True)
+
+        # Generate preview image.
         integration = OpenSCADIntegration()
-
-        # Hardcoded preview settings
-        preview_size = [1080, 1080]  # Fixed image size
+        preview_size = [1080, 1080]
         preview_file = args.output_scad.replace(".scad", "_preview.png")
-
-        # Generate preview images
-        print("\nGenerating preview image...")
+        print("\nGenerating preview image...", flush=True)
         integration.generate_preview(args.output_scad, preview_file, size=preview_size)
+        print(f"Preview generated successfully: {preview_file}", flush=True)
 
-        # Generate STL files (using export_manager.py)
-        print("\nGenerating STL files...")
+        # Generate STL files.
+        print("\nGenerating STL files...", flush=True)
         stl_file = args.output_scad.replace(".scad", ".stl")
         integration.generate_stl(args.output_scad, stl_file)
-    
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        raise
 
+    except Exception as e:
+        print(f"Error: {str(e)}", flush=True)
+        raise
 
 if __name__ == "__main__":
     main()
+
 ```
 
 # lib/__init__.py
@@ -206,9 +200,25 @@ if __name__ == "__main__":
 from typing import Dict, Any, List, Set
 
 class Config:
-    """Central configuration management for Shadow City Generator"""
+    """Central configuration management for Shadow City Generator
 
+    This class defines all the key constants and default settings that control:
+      • How features are recognized (buildings, water, roads, etc.)
+      • Default artistic style settings (merging, detail, height variance, etc.)
+      • Layer-specific parameters (depths, widths, minimum areas)
+      • Industrial, green space, and building cluster behavior
+
+    Changing these values will directly affect the generated 3D model. For example:
+      - Increasing 'merge_distance' in DEFAULT_STYLE will make nearby buildings merge more aggressively.
+      - Adjusting 'min_building_area' will filter out smaller structures from being included.
+      - Altering water or road dimensions in DEFAULT_LAYER_SPECS changes the physical proportions in the model.
+    """
+
+    # -----------------------------------------------------------------------------
     # Feature Types and Tags
+    # -----------------------------------------------------------------------------
+    # These keys map common OpenStreetMap (OSM) tags to internal identifiers.
+    # Changing these values would change how the generator categorizes input features.
     FEATURE_TYPES = {
         'BUILDING': 'building',
         'WATER': 'water',
@@ -222,7 +232,12 @@ class Config:
         'BRIDGE': 'bridge'
     }
 
+    # -----------------------------------------------------------------------------
     # Industrial Feature Recognition
+    # -----------------------------------------------------------------------------
+    # These sets determine which landuse or building tags are treated as "industrial."
+    # Modifying these lists affects which features are processed with industrial rules,
+    # including using different height multipliers and merging strategies.
     INDUSTRIAL_LANDUSE: Set[str] = {
         'industrial',
         'construction',
@@ -240,7 +255,17 @@ class Config:
         'hangar'
     }
 
+    # -----------------------------------------------------------------------------
     # Default Style Settings
+    # -----------------------------------------------------------------------------
+    # These settings are used if the user does not override them via command-line options.
+    # They affect building merging, cluster formation, artistic height variation, and overall style.
+    # • merge_distance: How close buildings must be to merge. Increasing this makes clusters larger.
+    # • cluster_size: Threshold for grouping buildings. Higher values result in fewer, larger clusters.
+    # • height_variance: Degree of variation in building heights. Higher values yield more dramatic differences.
+    # • detail_level: Controls architectural detail; higher levels add more intricate shapes.
+    # • artistic_style: Determines the overall look ('modern', 'classic', 'minimal', or 'block-combine').
+    # • min_building_area: Minimum footprint (in m²) to include a building. Raising this ignores small structures.
     DEFAULT_STYLE: Dict[str, Any] = {
         'merge_distance': 2.0,
         'cluster_size': 3.0,
@@ -250,20 +275,32 @@ class Config:
         'min_building_area': 600.0
     }
 
-    # Available Artistic Styles
+    # List of allowed artistic styles.
+    # To add a new style, include it here and update related style generators.
     ARTISTIC_STYLES: List[str] = ['modern', 'classic', 'minimal', 'block-combine']
 
+    # -----------------------------------------------------------------------------
     # Default Layer Specifications
+    # -----------------------------------------------------------------------------
+    # These settings define the geometry (depths, widths, etc.) for different layers in the model.
+    # Adjust these to modify the physical proportions:
+    #   • water: Depth and minimum area to be recognized as water.
+    #   • roads: Base width, depth, and multipliers for different road types.
+    #   • railways: Depth and width for railway features.
+    #   • parks: Vertical offset and thickness for parks/green spaces.
+    #   • buildings: Default building height range and per-level height.
+    #   • base: The thickness of the supporting base.
+    #   • bridges: Dimensions for bridge decks and supports.
     DEFAULT_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
         'water': {
-            'depth': 2.4,
-            'min_area': 10.0  # Minimum area in m² to consider as water
+            'depth': 2.4,          # Changing this makes water features appear deeper or shallower.
+            'min_area': 10.0       # Only water features with area above this (in m²) are rendered.
         },
         'roads': {
-            'depth': 0.4,
-            'width': 1.0,
+            'depth': 0.4,          # The vertical "cut" into the base for roads.
+            'width': 1.0,          # Base road width; multiplied by road type factors.
             'types': {
-                'motorway': 2.0,
+                'motorway': 2.0,   # Motorways appear wider (2× the base width).
                 'trunk': 1.8,
                 'primary': 1.5,
                 'secondary': 1.2,
@@ -273,30 +310,37 @@ class Config:
         },
         'railways': {
             'depth': 0.6,
-            'width': 1.5
+            'width': 1.5         # Wider railways yield thicker lines in the model.
         },
         'parks': {
-            'start_offset': 0.2,
-            'thickness': 0.4,
-            'min_area': 100.0  # Minimum area in m² to consider as park
+            'start_offset': 0.2,  # Vertical offset from the base at which parks start.
+            'thickness': 0.4,     # Extrusion height for park areas.
+            'min_area': 100.0     # Parks smaller than this (in m²) are ignored.
         },
         'buildings': {
-            'min_height': 2,
-            'max_height': 8,
-            'default_height': 4,
-            'levels_height': 3.0  # meters per level for building:levels
+            'min_height': 2,         # Minimum height for buildings in mm.
+            'max_height': 8,         # Maximum height for buildings in mm.
+            'default_height': 4,     # Default height used if no specific value is provided.
+            'levels_height': 3.0     # Height per building level; used when calculating from 'building:levels'.
         },
         'base': {
-            'height': 3
+            'height': 3            # The thickness of the base block; increasing this raises the entire model.
         },
         'bridges': {
-            'height': 2.0,
-            'thickness': 0.6,
-            'support_width': 2.0
+            'height': 2.0,         # How high above the base the bridge deck is placed.
+            'thickness': 0.6,      # Thickness of the bridge deck.
+            'support_width': 2.0   # Diameter of the bridge support columns.
         }
     }
 
+    # -----------------------------------------------------------------------------
     # Industrial Area Settings
+    # -----------------------------------------------------------------------------
+    # These settings modify how industrial features are processed:
+    #   • height_multipliers: Factors by which base heights are multiplied for different industrial types.
+    #   • min_area: Minimum area (in m²) for an industrial feature to be processed.
+    #   • default_height: Fallback height if no other info is provided.
+    # Changing multipliers will make certain industrial buildings appear taller or shorter relative to others.
     INDUSTRIAL_SETTINGS: Dict[str, Any] = {
         'height_multipliers': {
             'industrial': 2.0,
@@ -309,11 +353,15 @@ class Config:
             'manufacturing': 1.8,
             'hangar': 1.6
         },
-        'min_area': 400.0,  # Minimum area in m² for industrial buildings
-        'default_height': 15.0  # Default height if no other height info available
+        'min_area': 400.0,           # Industrial features smaller than 400 m² are typically ignored.
+        'default_height': 15.0       # Default industrial building height in mm if no specific info exists.
     }
 
+    # -----------------------------------------------------------------------------
     # Park and Green Space Types
+    # -----------------------------------------------------------------------------
+    # These sets determine which OSM tags are recognized as green spaces.
+    # Changing these values can include or exclude features based on their landuse or leisure tag.
     GREEN_LANDUSE: Set[str] = {
         'grass',
         'forest',
@@ -332,7 +380,12 @@ class Config:
         'playground'
     }
 
+    # -----------------------------------------------------------------------------
     # Block Types and Settings
+    # -----------------------------------------------------------------------------
+    # Block types are used when combining buildings into clusters (especially in "block-combine" style).
+    # They include minimum/maximum heights and preset roof style options.
+    # Adjusting these values changes the overall proportions and roof details of clusters.
     BLOCK_TYPES: Dict[str, Dict[str, Any]] = {
         'residential': {
             'min_height': 10.0,
@@ -363,7 +416,12 @@ class Config:
         }
     }
 
+    # -----------------------------------------------------------------------------
     # Roof Style Configurations
+    # -----------------------------------------------------------------------------
+    # These configurations define the ranges and default values for various roof styles.
+    # Modifying these ranges affects how roofs are generated—for instance, a higher 'default_angle'
+    # in the 'sawtooth' style will produce steeper roof slopes.
     ROOF_STYLES: Dict[str, Dict[str, Any]] = {
         'pitched': {
             'height_factor_range': (0.2, 0.4),
@@ -391,7 +449,14 @@ class Config:
         }
     }
 
+    # -----------------------------------------------------------------------------
     # Geometry Processing Settings
+    # -----------------------------------------------------------------------------
+    # These parameters affect how raw geometry from GeoJSON is processed:
+    #   • simplification_tolerance: Higher values simplify geometry more aggressively (may lose detail).
+    #   • min_points_polygon / min_points_linestring: Minimum required points for valid geometry.
+    #   • buffer_distance: Controls extra padding for buffering linear features.
+    #   • merge_threshold: Minimum distance for considering points distinct.
     GEOMETRY_SETTINGS: Dict[str, Any] = {
         'simplification_tolerance': 0.1,
         'min_points_polygon': 3,
@@ -401,25 +466,41 @@ class Config:
             'railways': 1.0,
             'water': 1.5
         },
-        'merge_threshold': 0.001  # Minimum distance to consider points different
+        'merge_threshold': 0.001  # If set too high, nearby distinct points may merge unexpectedly.
     }
 
+    # -----------------------------------------------------------------------------
     # Processing Settings
+    # -----------------------------------------------------------------------------
+    # These settings control overall processing behavior during feature combination:
+    #   • area_threshold: Minimum area (in m²) for merging buildings in "block-combine" style.
+    #   • min_cluster_size / max_cluster_size: Limits for cluster formation.
+    #   • barrier_buffer: Extra spacing around barriers (e.g., roads or water) used during merging.
+    # Tuning these values alters how aggressively small features merge into clusters.
     PROCESSING_SETTINGS: Dict[str, Any] = {
-        'area_threshold': 200,  # m² threshold for block-combine style
-        'min_cluster_size': 2,  # Minimum number of buildings to form a cluster
-        'max_cluster_size': 10,  # Maximum number of buildings in a cluster
-        'barrier_buffer': 1.0,  # Buffer distance for barriers in meters
+        'area_threshold': 200,  # Increasing this value causes more buildings to merge into clusters.
+        'min_cluster_size': 2,  # Fewer clusters will form if this number is raised.
+        'max_cluster_size': 7,  # Was 10, Prevents clusters from becoming excessively large.
+        'barrier_buffer': 1.0,  # A larger buffer prevents merging across barriers.
     }
 
+    # -----------------------------------------------------------------------------
+    # Class Methods for Helper Operations
+    # -----------------------------------------------------------------------------
     @classmethod
     def get_road_width(cls, road_type: str) -> float:
-        """Get road width multiplier for specific road type"""
+        """Get road width multiplier for a specific road type.
+        
+        The returned multiplier is used to scale the base road width.
+        """
         return cls.DEFAULT_LAYER_SPECS['roads']['types'].get(road_type, 1.0)
 
     @classmethod
     def get_industrial_height_multiplier(cls, building_type: str) -> float:
-        """Get height multiplier for specific industrial building type"""
+        """Get height multiplier for a specific industrial building type.
+        
+        This multiplier influences how much taller an industrial building appears.
+        """
         return cls.INDUSTRIAL_SETTINGS['height_multipliers'].get(
             building_type, 
             cls.INDUSTRIAL_SETTINGS['height_multipliers']['industrial']
@@ -427,7 +508,10 @@ class Config:
 
     @classmethod
     def is_industrial_feature(cls, properties: Dict[str, Any]) -> bool:
-        """Check if a feature should be processed as industrial"""
+        """Determine whether a feature should be processed as industrial.
+        
+        Checks both the 'building' and 'landuse' properties against known industrial tags.
+        """
         if not properties:
             return False
             
@@ -443,10 +527,15 @@ class Config:
 
     @classmethod
     def is_green_space(cls, properties: Dict[str, Any]) -> bool:
-        """Check if a feature should be processed as a green space"""
+        """Determine whether a feature should be processed as green space.
+        
+        Considers both 'landuse' and 'leisure' tags. Adjusting GREEN_LANDUSE or GREEN_LEISURE
+        alters which features are rendered as parks or gardens.
+        """
         landuse = properties.get('landuse', '').lower()
         leisure = properties.get('leisure', '').lower()
         return landuse in cls.GREEN_LANDUSE or leisure in cls.GREEN_LEISURE
+
 ```
 
 # lib/converter.py
@@ -3656,6 +3745,30 @@ body {
   color: #7f8c8d;
   text-transform: uppercase;
 }
+
+/* Add to public/css/style.css */
+.log-container {
+  margin-top: 20px;
+  background-color: #1e1e1e;
+  border-radius: 4px;
+  padding: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.9em;
+}
+
+.log-entry {
+  margin: 2px 0;
+  padding: 4px;
+  border-left: 3px solid transparent;
+  white-space: pre-wrap; /* Ensure text wraps */
+  word-break: break-word; /* Break long words */
+}
+
+.log-info { color: #cfcfcf; border-color: #4a90e2; }
+.log-warning { color: #ffd700; border-color: #ffd700; }
+.log-error { color: #ff4444; border-color: #ff4444; }
 ```
 
 # README.md
@@ -3960,7 +4073,6 @@ const upload = multer({
 
 // Argument configuration
 const OPTION_CONFIG = [
-  // Basic options
   { bodyKey: "size", cliFlag: "--size" },
   { bodyKey: "height", cliFlag: "--height" },
   { bodyKey: "style", cliFlag: "--style" },
@@ -3971,13 +4083,9 @@ const OPTION_CONFIG = [
   { bodyKey: "road-width", cliFlag: "--road-width" },
   { bodyKey: "water-depth", cliFlag: "--water-depth" },
   { bodyKey: "min-building-area", cliFlag: "--min-building-area" },
-
-  // Bridge options
   { bodyKey: "bridge-height", cliFlag: "--bridge-height" },
   { bodyKey: "bridge-thickness", cliFlag: "--bridge-thickness" },
   { bodyKey: "support-width", cliFlag: "--support-width" },
-
-  // Preprocessing options
   { bodyKey: "preprocess", cliFlag: "--preprocess", isFlag: true },
   { bodyKey: "crop-distance", cliFlag: "--crop-distance" },
   {
@@ -3989,8 +4097,6 @@ const OPTION_CONFIG = [
         : [];
     },
   },
-
-  // Debug flag
   { bodyKey: "debug", cliFlag: "--debug", isFlag: true },
 ];
 
@@ -4004,7 +4110,6 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
   OPTION_CONFIG.forEach((config) => {
     const value = body[config.bodyKey];
     if (value === undefined || value === "") return;
-
     if (config.process) {
       args.push(...config.process(value));
     } else if (config.isFlag) {
@@ -4017,30 +4122,37 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
   return args;
 };
 
-// Route handlers
+// Run Python process in unbuffered mode and capture logs.
+const runPythonProcess = (args) => {
+  return new Promise((resolve, reject) => {
+    // Use "-u" flag to force unbuffered output.
+    const pythonProcess = spawn("python3", ["-u", ...args]);
+    let stdoutData = "";
+    let stderrData = "";
+
+    pythonProcess.stdout.on("data", (data) => {
+      stdoutData += data.toString();
+    });
+    pythonProcess.stderr.on("data", (data) => {
+      stderrData += data.toString();
+    });
+
+    pythonProcess.on("close", (code) => {
+      if (code !== 0) {
+        reject(stderrData);
+      } else {
+        resolve({ stdout: stdoutData, stderr: stderrData });
+      }
+    });
+  });
+};
+
 app.get("/", (req, res) => res.render("index"));
 
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   res.json({ filePath: req.file.path });
 });
-
-const runPythonProcess = (args) => {
-  return new Promise((resolve, reject) => {
-    const pythonProcess = spawn("python3", args);
-    let stdoutData = "";
-    let stderrData = "";
-
-    pythonProcess.stdout.on("data", (data) => (stdoutData += data));
-    pythonProcess.stderr.on("data", (data) => (stderrData += data));
-
-    pythonProcess.on("close", (code) => {
-      code !== 0
-        ? reject(stderrData)
-        : resolve({ stdout: stdoutData, stderr: stderrData });
-    });
-  });
-};
 
 app.post("/preview", async (req, res) => {
   try {
@@ -4049,11 +4161,14 @@ app.post("/preview", async (req, res) => {
 
     const args = buildPythonArgs(req.body.uploadedFile, outputScad, req.body);
 
-    await runPythonProcess(args);
+    // Run Python process and capture logs.
+    const result = await runPythonProcess(args);
 
     res.json({
       previewMain: `/outputs/${outputBase}_preview_main.png`,
       previewFrame: `/outputs/${outputBase}_preview_frame.png`,
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (error) {
     res.status(500).json({ error: error.toString() });
@@ -4067,7 +4182,7 @@ app.post("/render", async (req, res) => {
 
     const args = buildPythonArgs(req.body.uploadedFile, outputPath, req.body);
 
-    await runPythonProcess(args);
+    const result = await runPythonProcess(args);
 
     res.json({
       mainScad: `/outputs/${outputBase}_main.scad`,
@@ -4076,6 +4191,8 @@ app.post("/render", async (req, res) => {
         mainStl: `/outputs/${outputBase}_main.stl`,
         frameStl: `/outputs/${outputBase}_frame.stl`,
       },
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (error) {
     res.status(500).json({ error: error.toString() });
@@ -4244,8 +4361,9 @@ app.listen(port, () =>
           <img id="previewFrame" src="" alt="Frame Model Preview" style="display: none;">
         </div>
       -->
+        <!-- Add to views/index.ejs, inside the log-container div -->
         <div class="log-container">
-          <h4>Live Log</h4>
+          <h4>Live Log <button id="clearLogBtn" class="btn btn-sm btn-secondary float-right">Clear Log</button></h4>
           <div id="liveLog"></div>
         </div>
 
@@ -4260,6 +4378,10 @@ app.listen(port, () =>
   </div>
 
   <script>
+    // Clear log button
+    $("#clearLogBtn").on("click", function () {
+      $("#liveLog").empty();
+    });
     // Debounce function to limit how often a function can be called
     function debounce(func, wait) {
       let timeout;
@@ -4313,8 +4435,14 @@ app.listen(port, () =>
           }
         },
         error: function (err) {
-          console.error("Preview update error:", err);
-          updateLog("Error generating preview:\n" + JSON.stringify(err));
+          console.error("Error:", err);
+          let errorMessage = "An error occurred: ";
+          if (err.responseJSON && err.responseJSON.error) {
+            errorMessage += err.responseJSON.error;
+          } else {
+            errorMessage += err.statusText || "Unknown error";
+          }
+          updateLog(errorMessage, "error");
         }
       });
     }
@@ -4325,11 +4453,14 @@ app.listen(port, () =>
       logContainer.scrollTop(logContainer[0].scrollHeight);
     }
 
-    // Function to append new log entries and auto-scroll
-    function updateLog(text) {
-      var logContainer = $("#liveLog");
-      logContainer.append(text + "\n"); // Append new log entries
-      scrollToBottom(); // Auto-scroll to bottom
+    // Update the updateLog function
+    function updateLog(message, level = 'info') {
+      const logContainer = $("#liveLog");
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = $("<div>").addClass(`log-entry log-${level}`)
+        .text(`[${timestamp}] ${message}`);
+      logContainer.append(logEntry);
+      scrollToBottom();
     }
 
     // Create debounced version of updatePreview with 2 second delay
@@ -4366,6 +4497,12 @@ app.listen(port, () =>
     $(".live-preview").on("change keyup", function () {
       debouncedUpdatePreview();
     });
+
+    // Scroll to bottom
+    function scrollToBottom() {
+      const logContainer = $("#liveLog");
+      logContainer.scrollTop(logContainer[0].scrollHeight);
+    }
 
     // Handle final render button click
     $("#renderBtn").on("click", function () {

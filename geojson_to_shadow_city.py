@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import sys
 from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
 from lib.preview.openscad_integration import OpenSCADIntegration
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -63,7 +63,7 @@ def main():
         default=600.0,
         help="Minimum building footprint area in m^2 (default: 600)",
     )
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("--debug", action="store_true", help="Enable detailed debug output")
 
     # Bridge parameters
     parser.add_argument(
@@ -106,7 +106,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        # Initialize style settings
+        # Prepare style settings; detailed logs are only enabled if --debug is passed.
         style_settings = {
             "artistic_style": args.style,
             "detail_level": args.detail,
@@ -119,55 +119,48 @@ def main():
             "support_width": args.support_width,
         }
 
-        # Create converter instance
+        # Create the converter and explicitly set debug based on the flag.
         converter = EnhancedCityConverter(
             size_mm=args.size, max_height_mm=args.height, style_settings=style_settings
         )
-
-        # Update feature specifications
+        converter.debug = args.debug  # When --debug is not passed, debug is False.
         converter.layer_specs["roads"]["width"] = args.road_width
         converter.layer_specs["water"]["depth"] = args.water_depth
-        converter.debug = args.debug
 
-        # Preprocess if requested
+        # Process input data (with optional preprocessing)
         if args.preprocess:
             if not (args.crop_distance or args.crop_bbox):
-                parser.error(
-                    "When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified"
-                )
-
+                parser.error("When --preprocess is enabled, either --crop-distance or --crop-bbox must be specified")
             preprocessor = GeoJSONPreprocessor(
                 bbox=args.crop_bbox, distance_meters=args.crop_distance
             )
             preprocessor.debug = args.debug
-
-            # Process and pass the data directly to converter
-            converter.convert_preprocessed(
-                args.input_json, args.output_scad, preprocessor
-            )
+            converter.convert_preprocessed(args.input_json, args.output_scad, preprocessor)
         else:
-            # Standard conversion without preprocessing
             converter.convert(args.input_json, args.output_scad)
-        # Set up OpenSCAD integration
+
+        # Print a concise summary of processed features.
+        print("\nConversion complete. Processed feature counts:", flush=True)
+        features = converter.style_manager.current_features
+        for category, items in features.items():
+            print(f"  {category}: {len(items)}", flush=True)
+
+        # Generate preview image.
         integration = OpenSCADIntegration()
-
-        # Hardcoded preview settings
-        preview_size = [1080, 1080]  # Fixed image size
+        preview_size = [1080, 1080]
         preview_file = args.output_scad.replace(".scad", "_preview.png")
-
-        # Generate preview images
-        print("\nGenerating preview image...")
+        print("\nGenerating preview image...", flush=True)
         integration.generate_preview(args.output_scad, preview_file, size=preview_size)
+        print(f"Preview generated successfully: {preview_file}", flush=True)
 
-        # Generate STL files (using export_manager.py)
-        print("\nGenerating STL files...")
+        # Generate STL files.
+        print("\nGenerating STL files...", flush=True)
         stl_file = args.output_scad.replace(".scad", ".stl")
         integration.generate_stl(args.output_scad, stl_file)
-    
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        raise
 
+    except Exception as e:
+        print(f"Error: {str(e)}", flush=True)
+        raise
 
 if __name__ == "__main__":
     main()

@@ -34,7 +34,6 @@ const upload = multer({
 
 // Argument configuration
 const OPTION_CONFIG = [
-  // Basic options
   { bodyKey: "size", cliFlag: "--size" },
   { bodyKey: "height", cliFlag: "--height" },
   { bodyKey: "style", cliFlag: "--style" },
@@ -45,13 +44,9 @@ const OPTION_CONFIG = [
   { bodyKey: "road-width", cliFlag: "--road-width" },
   { bodyKey: "water-depth", cliFlag: "--water-depth" },
   { bodyKey: "min-building-area", cliFlag: "--min-building-area" },
-
-  // Bridge options
   { bodyKey: "bridge-height", cliFlag: "--bridge-height" },
   { bodyKey: "bridge-thickness", cliFlag: "--bridge-thickness" },
   { bodyKey: "support-width", cliFlag: "--support-width" },
-
-  // Preprocessing options
   { bodyKey: "preprocess", cliFlag: "--preprocess", isFlag: true },
   { bodyKey: "crop-distance", cliFlag: "--crop-distance" },
   {
@@ -63,8 +58,6 @@ const OPTION_CONFIG = [
         : [];
     },
   },
-
-  // Debug flag
   { bodyKey: "debug", cliFlag: "--debug", isFlag: true },
 ];
 
@@ -78,7 +71,6 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
   OPTION_CONFIG.forEach((config) => {
     const value = body[config.bodyKey];
     if (value === undefined || value === "") return;
-
     if (config.process) {
       args.push(...config.process(value));
     } else if (config.isFlag) {
@@ -91,30 +83,37 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
   return args;
 };
 
-// Route handlers
+// Run Python process in unbuffered mode and capture logs.
+const runPythonProcess = (args) => {
+  return new Promise((resolve, reject) => {
+    // Use "-u" flag to force unbuffered output.
+    const pythonProcess = spawn("python3", ["-u", ...args]);
+    let stdoutData = "";
+    let stderrData = "";
+
+    pythonProcess.stdout.on("data", (data) => {
+      stdoutData += data.toString();
+    });
+    pythonProcess.stderr.on("data", (data) => {
+      stderrData += data.toString();
+    });
+
+    pythonProcess.on("close", (code) => {
+      if (code !== 0) {
+        reject(stderrData);
+      } else {
+        resolve({ stdout: stdoutData, stderr: stderrData });
+      }
+    });
+  });
+};
+
 app.get("/", (req, res) => res.render("index"));
 
 app.post("/uploadFile", upload.single("geojson"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   res.json({ filePath: req.file.path });
 });
-
-const runPythonProcess = (args) => {
-  return new Promise((resolve, reject) => {
-    const pythonProcess = spawn("python3", args);
-    let stdoutData = "";
-    let stderrData = "";
-
-    pythonProcess.stdout.on("data", (data) => (stdoutData += data));
-    pythonProcess.stderr.on("data", (data) => (stderrData += data));
-
-    pythonProcess.on("close", (code) => {
-      code !== 0
-        ? reject(stderrData)
-        : resolve({ stdout: stdoutData, stderr: stderrData });
-    });
-  });
-};
 
 app.post("/preview", async (req, res) => {
   try {
@@ -123,11 +122,14 @@ app.post("/preview", async (req, res) => {
 
     const args = buildPythonArgs(req.body.uploadedFile, outputScad, req.body);
 
-    await runPythonProcess(args);
+    // Run Python process and capture logs.
+    const result = await runPythonProcess(args);
 
     res.json({
       previewMain: `/outputs/${outputBase}_preview_main.png`,
       previewFrame: `/outputs/${outputBase}_preview_frame.png`,
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (error) {
     res.status(500).json({ error: error.toString() });
@@ -141,7 +143,7 @@ app.post("/render", async (req, res) => {
 
     const args = buildPythonArgs(req.body.uploadedFile, outputPath, req.body);
 
-    await runPythonProcess(args);
+    const result = await runPythonProcess(args);
 
     res.json({
       mainScad: `/outputs/${outputBase}_main.scad`,
@@ -150,6 +152,8 @@ app.post("/render", async (req, res) => {
         mainStl: `/outputs/${outputBase}_main.stl`,
         frameStl: `/outputs/${outputBase}_frame.stl`,
       },
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (error) {
     res.status(500).json({ error: error.toString() });
