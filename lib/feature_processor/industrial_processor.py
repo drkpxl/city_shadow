@@ -110,7 +110,7 @@ class IndustrialProcessor(BaseProcessor):
             base_height = self.style_manager.scale_building_height({
                 "height": str(explicit_height)
             })
-            return base_height * 1.5  # 50% bonus for industrial buildings
+            return base_height * 1.1  # Bonus for industrial buildings
             
         # Use type-based height calculation
         building_type = properties.get("building", "industrial")

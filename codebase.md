@@ -272,7 +272,7 @@ class Config:
         'height_variance': 0.2,
         'detail_level': 1.0,
         'artistic_style': 'modern',
-        'min_building_area': 600.0
+        'min_building_area': 200.0
     }
 
     # List of allowed artistic styles.
@@ -293,11 +293,11 @@ class Config:
     #   • bridges: Dimensions for bridge decks and supports.
     DEFAULT_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
         'water': {
-            'depth': 2.4,          # Changing this makes water features appear deeper or shallower.
+            'depth': 1.12,          # Changing this makes water features appear deeper or shallower.
             'min_area': 10.0       # Only water features with area above this (in m²) are rendered.
         },
         'roads': {
-            'depth': 0.4,          # The vertical "cut" into the base for roads.
+            'depth': 0.28,          # The vertical "cut" into the base for roads.
             'width': 1.0,          # Base road width; multiplied by road type factors.
             'types': {
                 'motorway': 2.0,   # Motorways appear wider (2× the base width).
@@ -309,12 +309,12 @@ class Config:
             }
         },
         'railways': {
-            'depth': 0.6,
+            'depth': 0.56,
             'width': 1.5         # Wider railways yield thicker lines in the model.
         },
         'parks': {
-            'start_offset': 0.2,  # Vertical offset from the base at which parks start.
-            'thickness': 0.4,     # Extrusion height for park areas.
+            'start_offset': 0,  # Vertical offset from the base at which parks start.
+            'thickness': 0.42,     # Extrusion height for park areas.
             'min_area': 100.0     # Parks smaller than this (in m²) are ignored.
         },
         'buildings': {
@@ -329,11 +329,18 @@ class Config:
         'bridges': {
             'height': 2.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
-            'support_width': 2.0, # Diameter of the bridge support columns.
+            'support_width':  {
+                'road': 2.0, # Diameter of the bridge support columns.
+                'rail': 2.0
+            },
             'min_size': 10.0,     # Minimum area (in m²) for a bridge to be recognized.
-            'assumed_width': 3     # Assumed width for bridges with no explicit width tag.
+            'assumed_width': {
+                'road': 3.0, # Assumed width for bridges without explicit width data.
+                'rail': 2.0
+            }
         }
     }
+
 
     # -----------------------------------------------------------------------------
     # Industrial Area Settings
@@ -345,18 +352,18 @@ class Config:
     # Changing multipliers will make certain industrial buildings appear taller or shorter relative to others.
     INDUSTRIAL_SETTINGS: Dict[str, Any] = {
         'height_multipliers': {
-            'industrial': 2.0,
+            'industrial': 1.0,
             'construction': 1.5,
             'depot': 1.5,
             'logistics': 1.8,
             'port': 2.0,
-            'warehouse': 1.7,
+            'warehouse': 1.2,
             'factory': 2.0,
             'manufacturing': 1.8,
             'hangar': 1.6
         },
         'min_area': 400.0,           # Industrial features smaller than 400 m² are typically ignored.
-        'default_height': 15.0       # Default industrial building height in mm if no specific info exists.
+        'default_height': 5.0       # Default industrial building height in mm if no specific info exists.
     }
 
     # -----------------------------------------------------------------------------
@@ -400,7 +407,7 @@ class Config:
         },
         'industrial': {
             'min_height': 15.0,
-            'max_height': 35.0,
+            'max_height': 20.0,
             'roof_styles': [
                 {'name': 'sawtooth', 'angle': 30},
                 {'name': 'flat', 'border': 2.0},
@@ -480,10 +487,10 @@ class Config:
     #   • barrier_buffer: Extra spacing around barriers (e.g., roads or water) used during merging.
     # Tuning these values alters how aggressively small features merge into clusters.
     PROCESSING_SETTINGS: Dict[str, Any] = {
-        'area_threshold': 100,  # Increasing this value causes more buildings to merge into clusters.
+        'area_threshold': 1000,  # Increasing this value causes more buildings to merge into clusters.
         'min_cluster_size': 2,  # Fewer clusters will form if this number is raised.
-        'max_cluster_size': 4,  # Was 10, Prevents clusters from becoming excessively large.
-        'barrier_buffer': 1.0,  # A larger buffer prevents merging across barriers.
+        'max_cluster_size': 7,  # Was 10, Prevents clusters from becoming excessively large.
+        'barrier_buffer': 0.5,  # Was 1 A larger buffer prevents merging across barriers.
     }
 
     # -----------------------------------------------------------------------------
@@ -741,7 +748,8 @@ class BuildingProcessor(BaseProcessor):
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
         # Only skip small buildings if not using block-combine style.
-        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
+        #if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
+        if area_m2 < min_area:
             if self.debug:
                 print(f"Skipping small building with area {area_m2:.1f}m²")
             return
@@ -984,7 +992,7 @@ class IndustrialProcessor(BaseProcessor):
             base_height = self.style_manager.scale_building_height({
                 "height": str(explicit_height)
             })
-            return base_height * 1.5  # 50% bonus for industrial buildings
+            return base_height * 1.1  # Bonus for industrial buildings
             
         # Use type-based height calculation
         building_type = properties.get("building", "industrial")
@@ -1322,14 +1330,17 @@ class ParkProcessor(BaseProcessor):
 
 ```py
 # lib/feature_processor/railway_processor.py
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from .linear_processor import LinearFeatureProcessor
 from ..config import Config
+from ..geometry import GeometryUtils
+
+
 
 class RailwayProcessor(LinearFeatureProcessor):
     """
-    Handles railway features using centralized configuration.
-    Inherits core linear processing functionality from LinearFeatureProcessor.
+    Processes railway features with bridge handling capabilities.
+    Inherits core linear processing from LinearFeatureProcessor.
     """
     
     FEATURE_TYPE = Config.FEATURE_TYPES['RAILWAY']
@@ -1337,78 +1348,64 @@ class RailwayProcessor(LinearFeatureProcessor):
 
     def process_railway(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
         """
-        Process railway feature using base class logic with railway-specific settings.
-        
-        Args:
-            feature: GeoJSON feature to process
-            features: Dictionary of feature collections to update
-            transform: Coordinate transformation function
-        """
-        # Get railway specifications from config
-        railway_specs = self.style_manager.get_default_layer_specs()['railways']
-        
-        # Process using base class with railway width
-        self._process_linear_feature(
-            feature,
-            features,
-            transform,
-            width_override=railway_specs['width'],
-            additional_tags=["service"]  # Preserve service type
-        )
-        
-    def _process_linear_feature(
-        self, 
-        feature: Dict[str, Any], 
-        features: Dict[str, list],
-        transform,
-        width_override: Optional[float] = None,
-        additional_tags: Optional[list] = None
-    ) -> None:
-        """
-        Enhanced linear feature processing with railway-specific handling.
-        
-        Args:
-            feature: GeoJSON feature to process
-            features: Dictionary of feature collections to update
-            transform: Coordinate transformation function
-            width_override: Optional specific width to use
-            additional_tags: Optional additional properties to preserve
+        Main processing method for railway features with bridge detection.
         """
         props = feature.get("properties", {})
         
-        # Skip if tunnel
-        if self._is_tunnel(props):
-            self._log_debug(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
-            return
-            
+        if self._is_bridge(props):
+            self._process_railway_bridge(feature, features, transform)
+        else:
+            self._process_regular_railway(feature, features, transform)
+
+    def _process_regular_railway(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """Process non-bridge railways using parent class logic"""
+        railway_specs = self.style_manager.get_default_layer_specs()['railways']
+        super()._process_linear_feature(
+            feature,
+            features,
+            transform,
+            width_override=railway_specs['width']
+        )
+
+    def _process_railway_bridge(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """Special handling for railway bridges"""
         coords = self.geometry.extract_coordinates(feature)
         if not coords or len(coords) < 2:
             return
 
         transformed = [transform(lon, lat) for lon, lat in coords]
-        
-        feature_data = {
-            "coords": transformed,
-            "type": props.get(self.FEATURE_TYPE, "rail"),
-            "width": width_override or self.style_manager.get_default_layer_specs()['railways']['width']
-        }
+        bridge_specs = self.style_manager.get_default_layer_specs()['bridges']
+        railway_specs = self.style_manager.get_default_layer_specs()['railways']
 
-        # Add additional properties if specified
-        if additional_tags:
-            for tag in additional_tags:
-                if tag in props:
-                    feature_data[tag] = props[tag]
+        # Calculate bridge metrics
+        bridge_width = railway_specs['width']
+        bridge_area = self._calculate_bridge_area(transformed, bridge_width)
 
-        features[self.feature_category].append(feature_data)
-        
-        self._log_debug(
-            f"Added {self.FEATURE_TYPE} '{feature_data['type']}' with width {feature_data['width']:.1f}mm"
-        )
+        if bridge_area >= bridge_specs['min_size']:
+            features["bridges"].append({
+                "coords": transformed,
+                "type": "rail_bridge",
+                "height": bridge_specs['height'],
+                "thickness": bridge_specs['thickness'],
+                "support_width": bridge_specs['support_width']['rail'],
+                "width": bridge_width,
+                "span_type": "rail"
+            })
+        else:
+            self._process_regular_railway(feature, features, transform)
 
-    def _log_debug(self, message: str) -> None:
-        """Wrapper for debug logging."""
-        if self.debug:
-            print(message)
+    def _is_bridge(self, props: Dict[str, Any]) -> bool:
+        """Determine if the railway feature is a bridge"""
+        return props.get("bridge") in ["yes", "true", "1"]
+
+    def _calculate_bridge_area(self, coords: List[List[float]], width: float) -> float:
+        """Calculate bridge area using railway geometry"""
+        if len(coords) < 2:
+            return 0.0
+        start_point = coords[0]
+        end_point = coords[-1]
+        length = GeometryUtils.calculate_distance(start_point, end_point)
+        return length * width
 ```
 
 # lib/feature_processor/road_processor.py
@@ -2029,7 +2026,7 @@ class ExportManager:
         self.openscad_path = openscad_path
         self.export_quality = {
             "fn": 256,
-            "fa": 2,
+            "fa": 4,
             "fs": 0.2,
         }
 
@@ -2073,7 +2070,7 @@ class ExportManager:
 
         # Add quality settings
         for param, value in self.export_quality.items():
-            command.extend(["-D", f"${param}={value}"])
+            command.extend(["-D", f"{param}={value}"])
 
         command.append(input_file)
 
@@ -2205,6 +2202,8 @@ class PreviewGenerator:
 # lib/scad_generator.py
 
 ```py
+# lib/scad_generator.py
+from typing import Dict, Optional, List
 from .geometry import GeometryUtils
 from .style.style_manager import StyleManager
 from .style.generate_building import BuildingGenerator
@@ -2218,7 +2217,6 @@ class ScadGenerator:
     def generate_openscad(self, features, size, layer_specs):
         """
         Generate complete OpenSCAD code for main model (excluding frame).
-        We 'union' buildings, bridges, and parks, then 'difference' roads/water/rail.
         """
         scad = [
             f"""// Generated with Enhanced City Converter
@@ -2265,7 +2263,6 @@ difference() {{
             roof_params = building.get("roof_params")
             is_cluster = building.get("is_cluster", False)
 
-            # Generate the building details with explicit roof style if it's a cluster
             if is_cluster and roof_style and roof_params:
                 details = self.building_generator.generate_building_details(
                     points_str=points_str,
@@ -2291,11 +2288,10 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_water_features(self, water_features, layer_specs):
-        """Generate OpenSCAD code for water features (subtractive)"""
+        """Generate OpenSCAD code for water features (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         water_depth = layer_specs["water"]["depth"]
-        # Get park specifications to calculate full extrusion height
         park_specs = layer_specs["parks"]
         park_offset = park_specs.get("start_offset", 0.2)
         park_thickness = park_specs.get("thickness", 0.4)
@@ -2319,7 +2315,7 @@ difference() {{
         return "\n".join(scad)
     
     def _generate_road_features(self, road_features, layer_specs):
-        """Generate OpenSCAD code for road features (subtractive)"""
+        """Generate OpenSCAD code for road features (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         road_depth = layer_specs["roads"]["depth"]
@@ -2357,7 +2353,7 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_railway_features(self, railway_features, layer_specs):
-        """Generate OpenSCAD code for railways (subtractive)"""
+        """Generate OpenSCAD code for railways (subtractive)."""
         scad = []
         base_height = layer_specs["base"]["height"]
         railway_depth = layer_specs["railways"]["depth"]
@@ -2384,44 +2380,113 @@ difference() {{
         return "\n".join(scad)
 
     def _generate_bridge_features(self, bridge_features, layer_specs):
-        """Generate OpenSCAD code for bridges with improved 3D printing support"""
+        """Generate OpenSCAD code for bridges with rail/road differentiation."""
         scad = []
         base_height = layer_specs["base"]["height"]
-        bridge_height = layer_specs["bridges"]["height"]
-        bridge_thickness = layer_specs["bridges"]["thickness"]
-        support_width = layer_specs["bridges"]["support_width"]
-        road_width = layer_specs["roads"]["width"]
-
+        
         for i, bridge in enumerate(bridge_features):
             coords = bridge.get("coords", [])
             if len(coords) < 2:
                 continue
 
-            points_str = self.geometry.generate_buffered_polygon(coords, road_width)
-            if points_str:
-                start_point = coords[0]
-                end_point = coords[-1]
+            bridge_type = bridge.get("type", "road_bridge")
+            is_rail = bridge.get("span_type") == "rail"
+            
+            # Get type-specific parameters
+            style_config = self._get_bridge_style_config(bridge_type, layer_specs)
+            points_str = self.geometry.generate_buffered_polygon(
+                coords, 
+                bridge.get("width", layer_specs['roads']['width'])
+            )
 
-                scad.append(
-                    f"""
-        // Bridge {i+1}
+            scad.append(f"""
+        // {style_config['name']} {i+1}
         union() {{
-            color("orange")
-            {{
-                // Main bridge deck
-                translate([0, 0, {base_height + bridge_height}])
-                    linear_extrude(height={bridge_thickness}, convexity=2)
+            color("{style_config['color']}") {{
+                translate([0, 0, {base_height + bridge['height']}])
+                    linear_extrude(height={bridge['thickness']}, convexity=2)
                         polygon([{points_str}]);
             }}
-            // Bridge supports (remain uncolored for clarity)
-            translate([{start_point[0]}, {start_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
-            translate([{end_point[0]}, {end_point[1]}, {base_height}])
-                cylinder(h={bridge_height}, r={support_width/2}, $fn=8);
-        }}"""
-                )
+            {self._generate_bridge_supports(coords, base_height, bridge['height'], bridge['support_width'])}
+        }}""")
 
         return "\n".join(scad)
+
+    def _get_bridge_style_config(self, bridge_type: str, layer_specs: Dict) -> Dict:
+        """Return style parameters for different bridge types."""
+        return {
+            "road_bridge": {
+                "name": "Road Bridge",
+                "color": "orange",
+                "support_width": layer_specs['bridges']['support_width']['road']
+            },
+            "rail_bridge": {
+                "name": "Rail Bridge",
+                "color": "steelblue",
+                "support_width": layer_specs['bridges']['support_width']['rail']
+            }
+        }.get(bridge_type, {})
+
+    def _generate_bridge_supports(self, coords: List[List[float]], 
+                                base_height: float, 
+                                bridge_height: float,
+                                support_radius: float) -> str:
+        """Generate support structures for bridges."""
+        supports = []
+        support_interval = 50  # mm between supports
+        
+        # Always include end supports
+        supports.extend([
+            self._generate_support(coords[0], base_height, bridge_height, support_radius),
+            self._generate_support(coords[-1], base_height, bridge_height, support_radius)
+        ])
+
+        # Calculate intermediate supports
+        total_length = sum(
+            self.geometry.calculate_distance(coords[i], coords[i+1])
+            for i in range(len(coords)-1)
+        )
+        
+        if total_length > support_interval:
+            num_supports = int(total_length // support_interval)
+            step = total_length / (num_supports + 1)
+            current_dist = step
+            
+            for _ in range(num_supports):
+                point = self._get_point_along_path(coords, current_dist)
+                if point:
+                    supports.append(
+                        self._generate_support(point, base_height, bridge_height, support_radius)
+                    )
+                current_dist += step
+
+        return "\n".join(supports)
+
+    def _generate_support(self, point: List[float], 
+                        base_height: float, 
+                        bridge_height: float,
+                        radius: float) -> str:
+        """Generate individual support cylinder."""
+        return f"""
+            translate([{point[0]}, {point[1]}, {base_height}])
+                cylinder(h={bridge_height}, r={radius}, $fn=16);"""
+
+    def _get_point_along_path(self, coords: List[List[float]], target_dist: float) -> Optional[List[float]]:
+        """Find point at specified distance along the path."""
+        accumulated = 0.0
+        for i in range(len(coords)-1):
+            start = coords[i]
+            end = coords[i+1]
+            segment_length = self.geometry.calculate_distance(start, end)
+            
+            if accumulated + segment_length >= target_dist:
+                ratio = (target_dist - accumulated) / segment_length
+                return [
+                    start[0] + ratio * (end[0] - start[0]),
+                    start[1] + ratio * (end[1] - start[1])
+                ]
+            accumulated += segment_length
+        return None
 
     def _generate_park_features(self, park_features, layer_specs):
         """Generate OpenSCAD code for park features."""

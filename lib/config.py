@@ -74,7 +74,7 @@ class Config:
         'height_variance': 0.2,
         'detail_level': 1.0,
         'artistic_style': 'modern',
-        'min_building_area': 1000.0
+        'min_building_area': 200.0
     }
 
     # List of allowed artistic styles.
@@ -95,11 +95,11 @@ class Config:
     #   • bridges: Dimensions for bridge decks and supports.
     DEFAULT_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
         'water': {
-            'depth': 2.4,          # Changing this makes water features appear deeper or shallower.
+            'depth': 1.12,          # Changing this makes water features appear deeper or shallower.
             'min_area': 10.0       # Only water features with area above this (in m²) are rendered.
         },
         'roads': {
-            'depth': 0.4,          # The vertical "cut" into the base for roads.
+            'depth': 0.28,          # The vertical "cut" into the base for roads.
             'width': 1.0,          # Base road width; multiplied by road type factors.
             'types': {
                 'motorway': 2.0,   # Motorways appear wider (2× the base width).
@@ -111,12 +111,12 @@ class Config:
             }
         },
         'railways': {
-            'depth': 0.6,
+            'depth': 0.56,
             'width': 1.5         # Wider railways yield thicker lines in the model.
         },
         'parks': {
-            'start_offset': 0.2,  # Vertical offset from the base at which parks start.
-            'thickness': 0.4,     # Extrusion height for park areas.
+            'start_offset': 0,  # Vertical offset from the base at which parks start.
+            'thickness': 0.42,     # Extrusion height for park areas.
             'min_area': 100.0     # Parks smaller than this (in m²) are ignored.
         },
         'buildings': {
@@ -131,11 +131,18 @@ class Config:
         'bridges': {
             'height': 2.0,         # How high above the base the bridge deck is placed.
             'thickness': 0.6,      # Thickness of the bridge deck.
-            'support_width': 2.0, # Diameter of the bridge support columns.
+            'support_width':  {
+                'road': 2.0, # Diameter of the bridge support columns.
+                'rail': 2.0
+            },
             'min_size': 10.0,     # Minimum area (in m²) for a bridge to be recognized.
-            'assumed_width': 3     # Assumed width for bridges with no explicit width tag.
+            'assumed_width': {
+                'road': 3.0, # Assumed width for bridges without explicit width data.
+                'rail': 2.0
+            }
         }
     }
+
 
     # -----------------------------------------------------------------------------
     # Industrial Area Settings
@@ -147,18 +154,18 @@ class Config:
     # Changing multipliers will make certain industrial buildings appear taller or shorter relative to others.
     INDUSTRIAL_SETTINGS: Dict[str, Any] = {
         'height_multipliers': {
-            'industrial': 2.0,
+            'industrial': 1.0,
             'construction': 1.5,
             'depot': 1.5,
             'logistics': 1.8,
             'port': 2.0,
-            'warehouse': 1.7,
+            'warehouse': 1.2,
             'factory': 2.0,
             'manufacturing': 1.8,
             'hangar': 1.6
         },
         'min_area': 400.0,           # Industrial features smaller than 400 m² are typically ignored.
-        'default_height': 15.0       # Default industrial building height in mm if no specific info exists.
+        'default_height': 5.0       # Default industrial building height in mm if no specific info exists.
     }
 
     # -----------------------------------------------------------------------------
@@ -202,7 +209,7 @@ class Config:
         },
         'industrial': {
             'min_height': 15.0,
-            'max_height': 35.0,
+            'max_height': 20.0,
             'roof_styles': [
                 {'name': 'sawtooth', 'angle': 30},
                 {'name': 'flat', 'border': 2.0},
@@ -282,9 +289,9 @@ class Config:
     #   • barrier_buffer: Extra spacing around barriers (e.g., roads or water) used during merging.
     # Tuning these values alters how aggressively small features merge into clusters.
     PROCESSING_SETTINGS: Dict[str, Any] = {
-        'area_threshold': 500,  # Increasing this value causes more buildings to merge into clusters.
+        'area_threshold': 1000,  # Increasing this value causes more buildings to merge into clusters.
         'min_cluster_size': 2,  # Fewer clusters will form if this number is raised.
-        'max_cluster_size': 6,  # Was 10, Prevents clusters from becoming excessively large.
+        'max_cluster_size': 7,  # Was 10, Prevents clusters from becoming excessively large.
         'barrier_buffer': 0.5,  # Was 1 A larger buffer prevents merging across barriers.
     }
 

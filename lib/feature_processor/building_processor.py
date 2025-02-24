@@ -16,7 +16,8 @@ class BuildingProcessor(BaseProcessor):
         min_area = self.style_manager.style.get("min_building_area", 600.0)
 
         # Only skip small buildings if not using block-combine style.
-        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
+        #if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
+        if area_m2 < min_area:
             if self.debug:
                 print(f"Skipping small building with area {area_m2:.1f}m²")
             return

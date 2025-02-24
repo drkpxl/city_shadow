@@ -8,7 +8,7 @@ class ExportManager:
         self.openscad_path = openscad_path
         self.export_quality = {
             "fn": 256,
-            "fa": 12,
+            "fa": 4,
             "fs": 0.2,
         }
 
@@ -52,7 +52,7 @@ class ExportManager:
 
         # Add quality settings
         for param, value in self.export_quality.items():
-            command.extend(["-D", f"${param}={value}"])
+            command.extend(["-D", f"{param}={value}"])
 
         command.append(input_file)
 
