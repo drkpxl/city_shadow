@@ -39,3 +39,46 @@ body {
   color: #007bff;
   margin-bottom: 10px;
 }
+
+/* Enhanced log styling */
+.log-window {
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.9em;
+}
+
+.log-entry {
+  margin: 2px 0;
+  padding: 4px;
+  border-left: 3px solid transparent;
+}
+
+.log-info { color: #cfcfcf; border-color: #4a90e2; }
+.log-warning { color: #ffd700; border-color: #ffd700; }
+.log-error { color: #ff4444; border-color: #ff4444; }
+
+.stat-card {
+  background: #f8f9fa;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 5px;
+  min-width: 120px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.stat-value {
+  font-size: 1.4em;
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.stat-label {
+  font-size: 0.8em;
+  color: #7f8c8d;
+  text-transform: uppercase;
+}

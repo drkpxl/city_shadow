@@ -199,6 +199,256 @@ if __name__ == "__main__":
 
 ```
 
+# lib/config.py
+
+```py
+# lib/config.py
+from typing import Dict, Any, List, Set
+
+class Config:
+    """Central configuration management for Shadow City Generator"""
+
+    # Feature Types and Tags
+    FEATURE_TYPES = {
+        'BUILDING': 'building',
+        'WATER': 'water',
+        'HIGHWAY': 'highway',
+        'RAILWAY': 'railway',
+        'INDUSTRIAL': 'industrial',
+        'LEISURE': 'leisure',
+        'LANDUSE': 'landuse',
+        'AMENITY': 'amenity',
+        'NATURAL': 'natural',
+        'BRIDGE': 'bridge'
+    }
+
+    # Industrial Feature Recognition
+    INDUSTRIAL_LANDUSE: Set[str] = {
+        'industrial',
+        'construction',
+        'depot',
+        'logistics',
+        'port',
+        'warehouse'
+    }
+    
+    INDUSTRIAL_BUILDINGS: Set[str] = {
+        'industrial',
+        'warehouse',
+        'factory',
+        'manufacturing',
+        'hangar'
+    }
+
+    # Default Style Settings
+    DEFAULT_STYLE: Dict[str, Any] = {
+        'merge_distance': 2.0,
+        'cluster_size': 3.0,
+        'height_variance': 0.2,
+        'detail_level': 1.0,
+        'artistic_style': 'modern',
+        'min_building_area': 600.0
+    }
+
+    # Available Artistic Styles
+    ARTISTIC_STYLES: List[str] = ['modern', 'classic', 'minimal', 'block-combine']
+
+    # Default Layer Specifications
+    DEFAULT_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
+        'water': {
+            'depth': 2.4,
+            'min_area': 10.0  # Minimum area in m² to consider as water
+        },
+        'roads': {
+            'depth': 0.4,
+            'width': 1.0,
+            'types': {
+                'motorway': 2.0,
+                'trunk': 1.8,
+                'primary': 1.5,
+                'secondary': 1.2,
+                'residential': 1.0,
+                'service': 0.8
+            }
+        },
+        'railways': {
+            'depth': 0.6,
+            'width': 1.5
+        },
+        'parks': {
+            'start_offset': 0.2,
+            'thickness': 0.4,
+            'min_area': 100.0  # Minimum area in m² to consider as park
+        },
+        'buildings': {
+            'min_height': 2,
+            'max_height': 8,
+            'default_height': 4,
+            'levels_height': 3.0  # meters per level for building:levels
+        },
+        'base': {
+            'height': 3
+        },
+        'bridges': {
+            'height': 2.0,
+            'thickness': 0.6,
+            'support_width': 2.0
+        }
+    }
+
+    # Industrial Area Settings
+    INDUSTRIAL_SETTINGS: Dict[str, Any] = {
+        'height_multipliers': {
+            'industrial': 2.0,
+            'construction': 1.5,
+            'depot': 1.5,
+            'logistics': 1.8,
+            'port': 2.0,
+            'warehouse': 1.7,
+            'factory': 2.0,
+            'manufacturing': 1.8,
+            'hangar': 1.6
+        },
+        'min_area': 400.0,  # Minimum area in m² for industrial buildings
+        'default_height': 15.0  # Default height if no other height info available
+    }
+
+    # Park and Green Space Types
+    GREEN_LANDUSE: Set[str] = {
+        'grass',
+        'forest',
+        'meadow',
+        'village_green',
+        'farmland',
+        'orchard'
+    }
+
+    GREEN_LEISURE: Set[str] = {
+        'park',
+        'garden',
+        'golf_course',
+        'recreation_ground',
+        'pitch',
+        'playground'
+    }
+
+    # Block Types and Settings
+    BLOCK_TYPES: Dict[str, Dict[str, Any]] = {
+        'residential': {
+            'min_height': 10.0,
+            'max_height': 25.0,
+            'roof_styles': [
+                {'name': 'pitched', 'height_factor': 0.3},
+                {'name': 'tiered', 'levels': 2},
+                {'name': 'flat', 'border': 1.0}
+            ]
+        },
+        'industrial': {
+            'min_height': 15.0,
+            'max_height': 35.0,
+            'roof_styles': [
+                {'name': 'sawtooth', 'angle': 30},
+                {'name': 'flat', 'border': 2.0},
+                {'name': 'stepped', 'levels': 2}
+            ]
+        },
+        'commercial': {
+            'min_height': 20.0,
+            'max_height': 40.0,
+            'roof_styles': [
+                {'name': 'modern', 'setback': 2.0},
+                {'name': 'tiered', 'levels': 2},
+                {'name': 'complex', 'variations': 5}
+            ]
+        }
+    }
+
+    # Roof Style Configurations
+    ROOF_STYLES: Dict[str, Dict[str, Any]] = {
+        'pitched': {
+            'height_factor_range': (0.2, 0.4),
+            'default_factor': 0.3
+        },
+        'tiered': {
+            'levels_range': (2, 4),
+            'default_levels': 2
+        },
+        'flat': {
+            'border_range': (0.8, 1.2),
+            'default_border': 1.0
+        },
+        'sawtooth': {
+            'angle_range': (25, 35),
+            'default_angle': 30
+        },
+        'modern': {
+            'setback_range': (1.8, 2.2),
+            'default_setback': 2.0
+        },
+        'stepped': {
+            'levels_range': (2, 4),
+            'default_levels': 2
+        }
+    }
+
+    # Geometry Processing Settings
+    GEOMETRY_SETTINGS: Dict[str, Any] = {
+        'simplification_tolerance': 0.1,
+        'min_points_polygon': 3,
+        'min_points_linestring': 2,
+        'buffer_distance': {
+            'roads': 1.0,
+            'railways': 1.0,
+            'water': 1.5
+        },
+        'merge_threshold': 0.001  # Minimum distance to consider points different
+    }
+
+    # Processing Settings
+    PROCESSING_SETTINGS: Dict[str, Any] = {
+        'area_threshold': 200,  # m² threshold for block-combine style
+        'min_cluster_size': 2,  # Minimum number of buildings to form a cluster
+        'max_cluster_size': 10,  # Maximum number of buildings in a cluster
+        'barrier_buffer': 1.0,  # Buffer distance for barriers in meters
+    }
+
+    @classmethod
+    def get_road_width(cls, road_type: str) -> float:
+        """Get road width multiplier for specific road type"""
+        return cls.DEFAULT_LAYER_SPECS['roads']['types'].get(road_type, 1.0)
+
+    @classmethod
+    def get_industrial_height_multiplier(cls, building_type: str) -> float:
+        """Get height multiplier for specific industrial building type"""
+        return cls.INDUSTRIAL_SETTINGS['height_multipliers'].get(
+            building_type, 
+            cls.INDUSTRIAL_SETTINGS['height_multipliers']['industrial']
+        )
+
+    @classmethod
+    def is_industrial_feature(cls, properties: Dict[str, Any]) -> bool:
+        """Check if a feature should be processed as industrial"""
+        if not properties:
+            return False
+            
+        building = properties.get('building', '').lower()
+        if building in cls.INDUSTRIAL_BUILDINGS:
+            return True
+            
+        landuse = properties.get('landuse', '').lower()
+        if landuse in cls.INDUSTRIAL_LANDUSE:
+            return True
+            
+        return False
+
+    @classmethod
+    def is_green_space(cls, properties: Dict[str, Any]) -> bool:
+        """Check if a feature should be processed as a green space"""
+        landuse = properties.get('landuse', '').lower()
+        leisure = properties.get('leisure', '').lower()
+        return landuse in cls.GREEN_LANDUSE or leisure in cls.GREEN_LEISURE
+```
+
 # lib/converter.py
 
 ```py
@@ -532,62 +782,42 @@ class FeatureProcessor:
 
 ```py
 # lib/feature_processor/industrial_processor.py
+from typing import Dict, Any, Optional, List, Tuple
 from shapely.geometry import Polygon
 from .base_processor import BaseProcessor
+from ..config import Config
 
 class IndustrialProcessor(BaseProcessor):
-    # Define industrial-related tags to look for
-    INDUSTRIAL_LANDUSE = {
-        'industrial',
-        'construction',
-        'depot',
-        'logistics',
-        'port',
-        'warehouse'
-    }
+    """
+    Handles processing of industrial buildings and areas, using centralized configuration
+    for consistent handling of industrial features.
+    """
     
-    INDUSTRIAL_BUILDINGS = {
-        'industrial',
-        'warehouse',
-        'factory',
-        'manufacturing',
-        'hangar'
-    }
-
-    def process_industrial_building(self, feature, features, transform):
-        """Process an industrial building with specific handling."""
+    def process_industrial_building(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """
+        Process an industrial building with specific industrial characteristics.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+        """
         props = feature.get("properties", {})
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
-
+            
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-        min_area = self.style_manager.style.get("min_building_area", 600.0)
-
-        # Only skip small industrial buildings if not in block-combine mode.
+        min_area = Config.INDUSTRIAL_SETTINGS['min_area']
+        
+        # Skip small buildings unless using block-combine style
         if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
-            if self.debug:
-                print(f"Skipping small industrial building with area {area_m2:.1f}m²")
+            self._log_debug(f"Skipping small industrial building with area {area_m2:.1f}m²")
             return
-
+            
         transformed = [transform(lon, lat) for lon, lat in coords]
+        height = self._calculate_industrial_height(props)
         
-        # Calculate height using our detailed calculator
-        layer_specs = self.style_manager.get_default_layer_specs()
-        min_height = layer_specs["buildings"]["min_height"]
-        max_height = layer_specs["buildings"]["max_height"]
-        
-        # Use explicit height if available, otherwise use industrial multiplier
-        height_m = self._get_explicit_height(props)
-        if height_m is not None:
-            base_height = self.style_manager.scale_building_height({
-                "height": str(height_m)
-            })
-            height = base_height * 1.5  # 50% bonus
-        else:
-            # Default to twice minimum height for industrial buildings
-            height = min(max_height, min_height * 2.0)
-
         features["industrial"].append({
             "coords": transformed,
             "height": height,
@@ -595,78 +825,114 @@ class IndustrialProcessor(BaseProcessor):
             "building_type": props.get("building", "industrial")
         })
         
-        if self.debug:
-            print(f"Added industrial building, height {height:.1f}mm, area {area_m2:.1f}m²")
+        self._log_debug(f"Added industrial building, height {height:.1f}mm, area {area_m2:.1f}m²")
 
-    def process_industrial_area(self, feature, features, transform):
-        """Process industrial landuse areas as buildings."""
+    def process_industrial_area(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """
+        Process industrial landuse areas as specialized building features.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+        """
         props = feature.get("properties", {})
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
-
-        # Check if this is an industrial area
+            
+        # Verify industrial landuse type
         landuse = props.get("landuse", "").lower()
-        if landuse not in self.INDUSTRIAL_LANDUSE:
+        if landuse not in Config.INDUSTRIAL_LANDUSE:
             return
-
+            
         transformed = [transform(lon, lat) for lon, lat in coords]
-
         area_m2 = self.geometry.approximate_polygon_area_m2(coords)
-        min_area = self.style_manager.style.get("min_building_area", 600.0)
-
-        # Only skip small industrial areas if not using block-combine style.
-        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < min_area):
-            if self.debug:
-                print(f"Skipping small industrial area with area {area_m2:.1f}m²")
+        
+        # Skip small areas unless using block-combine style
+        if (self.style_manager.style.get("artistic_style") != "block-combine") and (area_m2 < Config.INDUSTRIAL_SETTINGS['min_area']):
+            self._log_debug(f"Skipping small industrial area with area {area_m2:.1f}m²")
             return
-
-        layer_specs = self.style_manager.get_default_layer_specs()
-        min_height = layer_specs["buildings"]["min_height"]
-        max_height = layer_specs["buildings"]["max_height"]
+            
+        height = self._calculate_industrial_area_height(landuse)
         
-        # Different heights for different types
-        height_multipliers = {
-            'industrial': 2.0,
-            'construction': 1.5,
-            'depot': 1.5,
-            'logistics': 1.8,
-            'port': 2.0,
-            'warehouse': 1.7
-        }
-        
-        multiplier = height_multipliers.get(landuse, 1.5)
-        height = min(max_height, min_height * multiplier)
-
         features["industrial"].append({
             "coords": transformed,
             "height": height,
             "is_industrial": True,
             "landuse_type": landuse
         })
+        
+        self._log_debug(f"Added industrial area type '{landuse}' with height {height:.1f}mm")
 
-        if self.debug:
-            print(f"Added industrial area type '{landuse}' with height {height:.1f}mm")
+    def should_process_as_industrial(self, properties: Dict[str, Any]) -> bool:
+        """
+        Check if a feature should be processed as industrial using Config helper.
+        
+        Args:
+            properties: Feature properties to check
+            
+        Returns:
+            bool: True if feature should be processed as industrial
+        """
+        return Config.is_industrial_feature(properties)
 
-    def should_process_as_industrial(self, properties):
-        """Check if a feature should be processed as industrial."""
-        if not properties:
-            return False
+    def _calculate_industrial_height(self, properties: Dict[str, Any]) -> float:
+        """
+        Calculate height for industrial building using explicit height or type-based multiplier.
+        
+        Args:
+            properties: Building properties
             
-        # Check building tag
-        building = properties.get("building", "").lower()
-        if building in self.INDUSTRIAL_BUILDINGS:
-            return True
+        Returns:
+            float: Calculated height in mm
+        """
+        explicit_height = self._get_explicit_height(properties)
+        if explicit_height is not None:
+            # Apply industrial multiplier to explicit height
+            base_height = self.style_manager.scale_building_height({
+                "height": str(explicit_height)
+            })
+            return base_height * 1.5  # 50% bonus for industrial buildings
             
-        # Check landuse tag
-        landuse = properties.get("landuse", "").lower()
-        if landuse in self.INDUSTRIAL_LANDUSE:
-            return True
-            
-        return False
+        # Use type-based height calculation
+        building_type = properties.get("building", "industrial")
+        multiplier = Config.get_industrial_height_multiplier(building_type)
+        
+        layer_specs = self.style_manager.get_default_layer_specs()
+        min_height = layer_specs["buildings"]["min_height"]
+        max_height = layer_specs["buildings"]["max_height"]
+        
+        return min(max_height, min_height * multiplier)
 
-    def _get_explicit_height(self, properties):
-        """Extract explicit height from properties if available."""
+    def _calculate_industrial_area_height(self, landuse_type: str) -> float:
+        """
+        Calculate height for industrial landuse area.
+        
+        Args:
+            landuse_type: Type of industrial landuse
+            
+        Returns:
+            float: Calculated height in mm
+        """
+        multiplier = Config.get_industrial_height_multiplier(landuse_type)
+        
+        layer_specs = self.style_manager.get_default_layer_specs()
+        min_height = layer_specs["buildings"]["min_height"]
+        max_height = layer_specs["buildings"]["max_height"]
+        
+        return min(max_height, min_height * multiplier)
+
+    def _get_explicit_height(self, properties: Dict[str, Any]) -> Optional[float]:
+        """
+        Extract explicit height from properties if available.
+        
+        Args:
+            properties: Feature properties
+            
+        Returns:
+            Optional[float]: Explicit height in meters if available
+        """
         if "height" in properties:
             try:
                 height_str = properties["height"].split()[0]  # Handle "10 m" format
@@ -677,12 +943,21 @@ class IndustrialProcessor(BaseProcessor):
         if "building:levels" in properties:
             try:
                 levels = float(properties["building:levels"])
-                return levels * 3  # assume 3m per level
+                return levels * Config.DEFAULT_LAYER_SPECS["buildings"]["levels_height"]
             except ValueError:
                 pass
                 
         return None
 
+    def _log_debug(self, message: str) -> None:
+        """
+        Wrapper for debug logging.
+        
+        Args:
+            message: Debug message to log
+        """
+        if self.debug:
+            print(message)
 ```
 
 # lib/feature_processor/linear_processor.py
@@ -800,133 +1075,446 @@ class RoadProcessor(LinearFeatureProcessor):
 
 ```py
 # lib/feature_processor/park_processor.py
+from typing import Dict, Any, Optional
+from shapely.geometry import Polygon
 from .base_processor import BaseProcessor
+from ..config import Config
 
 class ParkProcessor(BaseProcessor):
     """
-    Processes OSM features for 'leisure' areas and green 'landuse' types
-    (grass, forest, etc.) into a dedicated layer.
+    Processes OSM features for green spaces and parks.
+    Uses centralized configuration for consistent handling of leisure and landuse features.
     """
 
-    GREEN_LANDUSE_VALUES = {"grass", "forest", "meadow", "village_green", "farmland", "orchard"}
-    GREEN_LEISURE_VALUES = {"park", "garden", "golf_course", "recreation_ground", "pitch", "playground"}
-
-    def process_park(self, feature, features, transform):
+    def process_park(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
         """
-        Extract polygons that are either 'leisure' or 'landuse' in the 'green' family
-        and store them into the `features["parks"]` bucket for later extrusion.
+        Process a park or green space feature, applying appropriate settings and transformations.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
         """
         props = feature.get("properties", {})
         geometry_type = feature["geometry"]["type"]
 
-        # Identify if feature is in one of our 'green' categories
+        # Skip if not a recognized green space type
+        if not self._is_valid_green_space(props):
+            return
+
+        # Extract and validate coordinates
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords or len(coords) < 3:
+            return
+
+        # Check minimum area requirement
+        area_m2 = self.geometry.approximate_polygon_area_m2(coords)
+        min_area = Config.DEFAULT_LAYER_SPECS["parks"]["min_area"]
+        
+        if area_m2 < min_area:
+            self._log_debug(f"Skipping small green space with area {area_m2:.1f}m²")
+            return
+
+        # Process valid polygon geometries
+        if geometry_type in ["Polygon", "MultiPolygon"]:
+            self._process_green_space_polygon(coords, features, transform, props)
+
+    def _process_green_space_polygon(
+        self, 
+        coords: list, 
+        features: Dict[str, list], 
+        transform,
+        props: Dict[str, Any]
+    ) -> None:
+        """
+        Process a valid green space polygon with appropriate styling.
+        
+        Args:
+            coords: List of coordinate pairs
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+            props: Feature properties
+        """
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        
+        # Get park specifications from config
+        park_specs = self.style_manager.get_default_layer_specs()["parks"]
+        
+        feature_data = {
+            "coords": transformed,
+            "type": self._determine_green_space_type(props),
+            "height": park_specs["thickness"],
+            "offset": park_specs["start_offset"]
+        }
+        
+        features["parks"].append(feature_data)
+        
+        self._log_debug(
+            f"Added {feature_data['type']} green space with {len(transformed)} points"
+        )
+
+    def _is_valid_green_space(self, props: Dict[str, Any]) -> bool:
+        """
+        Check if properties indicate a valid green space using Config settings.
+        
+        Args:
+            props: Feature properties
+            
+        Returns:
+            bool: True if feature is a valid green space
+        """
+        return Config.is_green_space(props)
+
+    def _determine_green_space_type(self, props: Dict[str, Any]) -> str:
+        """
+        Determine the specific type of green space for styling purposes.
+        
+        Args:
+            props: Feature properties
+            
+        Returns:
+            str: Specific type of green space
+        """
+        # Check landuse first
         landuse = props.get("landuse", "").lower()
+        if landuse in Config.GREEN_LANDUSE:
+            return landuse
+
+        # Check leisure second
         leisure = props.get("leisure", "").lower()
+        if leisure in Config.GREEN_LEISURE:
+            return leisure
 
-        # If it's landuse in GREEN_LANDUSE_VALUES or leisure in GREEN_LEISURE_VALUES
-        if (landuse in self.GREEN_LANDUSE_VALUES) or (leisure in self.GREEN_LEISURE_VALUES):
-            # Extract raw coords
-            coords = self.geometry.extract_coordinates(feature)
-            if not coords:
-                return
+        # Default fallback
+        return "park"
 
-            # For polygons only: if it has at least 3 points
-            # (We can skip linestring “parks” or points)
-            if geometry_type in ["Polygon", "MultiPolygon"] and len(coords) >= 3:
-                # Apply your standard lat/lon -> XY transform
-                transformed = [transform(lon, lat) for lon, lat in coords]
-                # Store them so we can extrude later in scad_generator
-                features["parks"].append({"coords": transformed})
+    def _get_height_for_type(self, green_space_type: str) -> float:
+        """
+        Get appropriate height for specific type of green space.
+        
+        Args:
+            green_space_type: Type of green space
+            
+        Returns:
+            float: Height in mm for the green space
+        """
+        park_specs = self.style_manager.get_default_layer_specs()["parks"]
+        
+        # Could extend this with type-specific heights in the future
+        return park_specs["thickness"]
 
+    def _should_add_features(self, green_space_type: str) -> bool:
+        """
+        Determine if additional features should be added based on type.
+        
+        Args:
+            green_space_type: Type of green space
+            
+        Returns:
+            bool: True if additional features should be added
+        """
+        # Could be extended to add trees, benches, etc. based on type
+        return green_space_type in {"park", "garden", "recreation_ground"}
+
+    def _log_debug(self, message: str) -> None:
+        """
+        Wrapper for debug logging.
+        
+        Args:
+            message: Debug message to log
+        """
+        if self.debug:
+            print(message)
 ```
 
 # lib/feature_processor/railway_processor.py
 
 ```py
 # lib/feature_processor/railway_processor.py
+from typing import Dict, Any, Optional
 from .linear_processor import LinearFeatureProcessor
+from ..config import Config
 
 class RailwayProcessor(LinearFeatureProcessor):
-    """Handles railway features using base linear processing"""
+    """
+    Handles railway features using centralized configuration.
+    Inherits core linear processing functionality from LinearFeatureProcessor.
+    """
     
-    FEATURE_TYPE = "railway"
-    feature_category = "railways"
+    FEATURE_TYPE = Config.FEATURE_TYPES['RAILWAY']
+    feature_category = 'railways'
 
-    def process_railway(self, feature, features, transform):
-        """Process railway feature using base class logic"""
-        super().process_linear_feature(
+    def process_railway(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """
+        Process railway feature using base class logic with railway-specific settings.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+        """
+        # Get railway specifications from config
+        railway_specs = self.style_manager.get_default_layer_specs()['railways']
+        
+        # Process using base class with railway width
+        self._process_linear_feature(
             feature,
             features,
             transform,
-            additional_tags=["service"]  # Preserve optional service tag
+            width_override=railway_specs['width'],
+            additional_tags=["service"]  # Preserve service type
         )
+        
+    def _process_linear_feature(
+        self, 
+        feature: Dict[str, Any], 
+        features: Dict[str, list],
+        transform,
+        width_override: Optional[float] = None,
+        additional_tags: Optional[list] = None
+    ) -> None:
+        """
+        Enhanced linear feature processing with railway-specific handling.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+            width_override: Optional specific width to use
+            additional_tags: Optional additional properties to preserve
+        """
+        props = feature.get("properties", {})
+        
+        # Skip if tunnel
+        if self._is_tunnel(props):
+            self._log_debug(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
+            return
+            
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords or len(coords) < 2:
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        
+        feature_data = {
+            "coords": transformed,
+            "type": props.get(self.FEATURE_TYPE, "rail"),
+            "width": width_override or self.style_manager.get_default_layer_specs()['railways']['width']
+        }
+
+        # Add additional properties if specified
+        if additional_tags:
+            for tag in additional_tags:
+                if tag in props:
+                    feature_data[tag] = props[tag]
+
+        features[self.feature_category].append(feature_data)
+        
+        self._log_debug(
+            f"Added {self.FEATURE_TYPE} '{feature_data['type']}' with width {feature_data['width']:.1f}mm"
+        )
+
+    def _log_debug(self, message: str) -> None:
+        """Wrapper for debug logging."""
+        if self.debug:
+            print(message)
 ```
 
 # lib/feature_processor/road_processor.py
 
 ```py
 # lib/feature_processor/road_processor.py
+from typing import Dict, Any, List, Optional
+from shapely.geometry import LineString, Polygon
 from .linear_processor import LinearFeatureProcessor
+from ..config import Config
 
 class RoadProcessor(LinearFeatureProcessor):
-    """Handles road and bridge features, inheriting core linear processing"""
+    """
+    Handles road and bridge features, using centralized configuration.
+    Inherits core linear processing functionality from LinearFeatureProcessor.
+    """
     
-    FEATURE_TYPE = "highway"
-    feature_category = "roads"
+    FEATURE_TYPE = Config.FEATURE_TYPES['HIGHWAY']
+    feature_category = 'roads'
 
-    def process_road_or_bridge(self, feature, features, transform):
-        """Handle roads and bridges with specialized processing"""
-        props = feature.get("properties", {})
+    def process_road_or_bridge(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """
+        Process roads and bridges with specialized handling.
         
-        # Process common road features
-        super().process_linear_feature(
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+        """
+        props = feature.get("properties", {})
+        road_type = props.get(self.FEATURE_TYPE)
+        
+        # Calculate actual road width based on road type
+        base_width = self.style_manager.get_default_layer_specs()['roads']['width']
+        type_multiplier = Config.get_road_width(road_type)
+        actual_width = base_width * type_multiplier
+        
+        # Process common road features with calculated width
+        self._process_linear_feature(
             feature, 
             features, 
             transform,
+            width_override=actual_width,
             additional_tags=["bridge"]  # Preserve bridge status
         )
         
-        # Special bridge handling
-        if props.get("bridge"):
+        # Special bridge handling if needed
+        if props.get(Config.FEATURE_TYPES['BRIDGE']):
             self._process_bridge(feature, features, transform, props)
 
-    def _process_bridge(self, feature, features, transform, props):
-        """Handle bridge-specific processing"""
+    def _process_linear_feature(
+        self, 
+        feature: Dict[str, Any], 
+        features: Dict[str, list],
+        transform,
+        width_override: Optional[float] = None,
+        additional_tags: Optional[List[str]] = None
+    ) -> None:
+        """
+        Enhanced linear feature processing with width override capability.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+            width_override: Optional specific width to use
+            additional_tags: Optional additional properties to preserve
+        """
+        props = feature.get("properties", {})
+        coords = self.geometry.extract_coordinates(feature)
+        if not coords:
+            return
+
+        # Skip tunnels
+        if self._is_tunnel(props):
+            self._log_debug(f"Skipping tunnel {self.FEATURE_TYPE}: {props.get(self.FEATURE_TYPE)}")
+            return
+
+        transformed = [transform(lon, lat) for lon, lat in coords]
+        if len(transformed) < 2:
+            return
+
+        # Create feature dictionary
+        feature_data = {
+            "coords": transformed,
+            "type": props.get(self.FEATURE_TYPE, "unknown"),
+            "is_parking": False,
+            "width": width_override or self.style_manager.get_default_layer_specs()['roads']['width']
+        }
+
+        # Preserve additional properties if specified
+        if additional_tags:
+            for tag in additional_tags:
+                if tag in props:
+                    feature_data[tag] = props[tag]
+
+        features[self.feature_category].append(feature_data)
+        
+        self._log_debug(
+            f"Added {self.FEATURE_TYPE} '{feature_data['type']}' with width {feature_data['width']:.1f}mm, {len(transformed)} points"
+        )
+
+    def _process_bridge(
+        self, 
+        feature: Dict[str, Any], 
+        features: Dict[str, list], 
+        transform,
+        props: Dict[str, Any]
+    ) -> None:
+        """
+        Handle bridge-specific processing with bridge settings from config.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+            props: Feature properties
+        """
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
         transformed = [transform(lon, lat) for lon, lat in coords]
         if len(transformed) >= 2:
+            # Get bridge settings from config
+            bridge_specs = self.style_manager.get_default_layer_specs()['bridges']
+            
             features["bridges"].append({
                 "coords": transformed,
-                "type": props.get("highway", "bridge")
+                "type": props.get(self.FEATURE_TYPE, "bridge"),
+                "height": bridge_specs['height'],
+                "thickness": bridge_specs['thickness'],
+                "support_width": bridge_specs['support_width']
             })
-            if self.debug:
-                print(f"Added bridge of type '{props.get('highway', 'bridge')}'")
+            
+            self._log_debug(f"Added bridge of type '{props.get(self.FEATURE_TYPE, 'bridge')}'")
 
-    def process_parking(self, feature, features, transform):
-        """Process parking areas as special road features"""
+    def process_parking(self, feature: Dict[str, Any], features: Dict[str, list], transform) -> None:
+        """
+        Process parking areas as special road features.
+        
+        Args:
+            feature: GeoJSON feature to process
+            features: Dictionary of feature collections to update
+            transform: Coordinate transformation function
+        """
         coords = self.geometry.extract_coordinates(feature)
         if not coords:
             return
 
         transformed = [transform(lon, lat) for lon, lat in coords]
-        if len(transformed) >= 3:  # Polygon check
+        if len(transformed) >= 3:  # Minimum points for a polygon
             features[self.feature_category].append({
                 "coords": transformed,
                 "type": "parking",
-                "is_parking": True
+                "is_parking": True,
+                "width": self.style_manager.get_default_layer_specs()['roads']['width']
             })
-            if self.debug:
-                print(f"Added parking area with {len(transformed)} points")
+            
+            self._log_debug(f"Added parking area with {len(transformed)} points")
 
-    def is_parking_area(self, props):
-        """Check if feature represents a parking area"""
+    def is_parking_area(self, props: Dict[str, Any]) -> bool:
+        """
+        Check if feature represents a parking area.
+        
+        Args:
+            props: Feature properties
+            
+        Returns:
+            bool: True if the feature is a parking area
+        """
         return any(
             props.get(key) in ["parking", "surface", "parking_aisle"]
-            for key in ["amenity", "parking", "service"]
+            for key in [Config.FEATURE_TYPES['AMENITY'], "parking", "service"]
         )
+
+    def _is_tunnel(self, props: Dict[str, Any]) -> bool:
+        """
+        Check if the feature is a tunnel.
+        
+        Args:
+            props: Feature properties
+            
+        Returns:
+            bool: True if the feature is a tunnel
+        """
+        return props.get("tunnel") in ["yes", "true", "1"]
+
+    def _log_debug(self, message: str) -> None:
+        """
+        Wrapper for debug logging.
+        
+        Args:
+            message: Debug message to log
+        """
+        if self.debug:
+            print(message)
 ```
 
 # lib/feature_processor/water_processor.py
@@ -2651,116 +3239,334 @@ class BuildingGenerator:
 
 ```py
 # lib/style/height_manager.py
+from typing import Dict, Any, Optional
 from math import log10
-
+from ..config import Config
 
 class HeightManager:
+    """
+    Manages height calculations and scaling for buildings.
+    Uses centralized configuration for consistent height handling.
+    """
+    
     def __init__(self, style_manager):
+        """
+        Initialize height manager with style manager reference.
+        
+        Args:
+            style_manager: StyleManager instance for accessing style settings
+        """
         self.style_manager = style_manager
 
-    def scale_height(self, properties):
-        """Scale building height based on properties."""
+    def scale_height(self, properties: Dict[str, Any]) -> float:
+        """
+        Scale building height based on properties and current style settings.
+        
+        Args:
+            properties: Building properties including height information
+            
+        Returns:
+            float: Scaled height in millimeters
+        """
         height_m = self._extract_height(properties)
-        return self._scale_to_range(height_m)
+        base_height = self._scale_to_range(height_m)
+        
+        # Apply any style-specific modifiers
+        return self._apply_style_modifiers(base_height, properties)
 
-    def _extract_height(self, properties):
-        """Extract height from building properties."""
-        default_height = 5.0
-
+    def _extract_height(self, properties: Dict[str, Any]) -> float:
+        """
+        Extract height from building properties using various OSM tags.
+        
+        Args:
+            properties: Building properties
+            
+        Returns:
+            float: Extracted height in meters
+        """
+        # Try explicit height tag first
         if "height" in properties:
             try:
-                return float(properties["height"].split()[0])
+                # Handle formats like "25 m", "25m", "25"
+                height_str = properties["height"].split()[0].strip('m')
+                return float(height_str)
             except (ValueError, IndexError):
                 pass
-        elif "building:levels" in properties:
+
+        # Try building:levels tag
+        if "building:levels" in properties:
             try:
                 levels = float(properties["building:levels"])
-                return levels * 3  # assume 3m per level
+                return levels * Config.DEFAULT_LAYER_SPECS["buildings"]["levels_height"]
             except ValueError:
                 pass
 
-        return default_height
+        # Try min_height tag
+        if "min_height" in properties:
+            try:
+                min_height_str = properties["min_height"].split()[0].strip('m')
+                return float(min_height_str)
+            except (ValueError, IndexError):
+                pass
 
-    def _scale_to_range(self, height_m):
-        """Scale height to target range using logarithmic scaling."""
-        layer_specs = self.style_manager.get_default_layer_specs()
-        min_height = layer_specs["buildings"]["min_height"]
-        max_height = layer_specs["buildings"]["max_height"]
+        # Use default height based on building type
+        building_type = properties.get("building", "").lower()
+        if building_type in Config.INDUSTRIAL_BUILDINGS:
+            return Config.INDUSTRIAL_SETTINGS["default_height"]
+            
+        return Config.DEFAULT_LAYER_SPECS["buildings"]["default_height"]
 
-        # Log scaling from 1..100 meters -> min_height..max_height in mm
+    def _scale_to_range(self, height_m: float) -> float:
+        """
+        Scale height to target range using logarithmic scaling.
+        
+        Args:
+            height_m: Height in meters
+            
+        Returns:
+            float: Scaled height in millimeters
+        """
+        specs = Config.DEFAULT_LAYER_SPECS["buildings"]
+        min_height = specs["min_height"]
+        max_height = specs["max_height"]
+
+        # Log scaling from 1..100 meters -> min_height..max_height mm
         log_min = log10(1.0)
         log_max = log10(101.0)
         log_height = log10(height_m + 1.0)  # +1 to avoid log(0)
-        scaled = (log_height - log_min) / (log_max - log_min)
-        final_height = min_height + scaled * (max_height - min_height)
-        return round(final_height, 2)
+        
+        # Calculate scaled height
+        scale_factor = (log_height - log_min) / (log_max - log_min)
+        scaled_height = min_height + scale_factor * (max_height - min_height)
+        
+        # Ensure height stays within bounds
+        return max(min_height, min(scaled_height, max_height))
 
+    def _apply_style_modifiers(self, base_height: float, properties: Dict[str, Any]) -> float:
+        """
+        Apply style-specific height modifications.
+        
+        Args:
+            base_height: Base calculated height
+            properties: Building properties
+            
+        Returns:
+            float: Modified height in millimeters
+        """
+        style = self.style_manager.style.get("artistic_style")
+        
+        # Apply style-specific modifiers
+        if style == "modern":
+            # Modern style: Taller buildings with more variation
+            height_variance = self.style_manager.style.get("height_variance", 0.2)
+            variance_factor = 1.0 + (height_variance * 0.5)  # Up to 50% taller
+            return base_height * variance_factor
+            
+        elif style == "classic":
+            # Classic style: More consistent heights
+            return base_height
+            
+        elif style == "minimal":
+            # Minimal style: Slightly reduced heights
+            return base_height * 0.8
+            
+        elif style == "block-combine":
+            # Block combine: Heights based on cluster characteristics
+            if properties.get("is_cluster", False):
+                # Clustered buildings get a slight height bonus
+                return base_height * 1.2
+            
+        return base_height
+
+    def get_height_range(self, building_type: str) -> tuple[float, float]:
+        """
+        Get valid height range for a building type.
+        
+        Args:
+            building_type: Type of building
+            
+        Returns:
+            tuple[float, float]: Minimum and maximum heights in millimeters
+        """
+        if building_type in Config.INDUSTRIAL_BUILDINGS:
+            specs = Config.BLOCK_TYPES["industrial"]
+        else:
+            specs = Config.BLOCK_TYPES["residential"]
+            
+        return specs["min_height"], specs["max_height"]
+
+    def calculate_relative_height(
+        self, 
+        base_height: float, 
+        importance_factor: float = 1.0
+    ) -> float:
+        """
+        Calculate height relative to base height with importance scaling.
+        
+        Args:
+            base_height: Base height to scale from
+            importance_factor: Factor to scale height (1.0 = no change)
+            
+        Returns:
+            float: Calculated relative height
+        """
+        specs = Config.DEFAULT_LAYER_SPECS["buildings"]
+        min_height = specs["min_height"]
+        max_height = specs["max_height"]
+        
+        # Scale height by importance while keeping within bounds
+        scaled_height = base_height * importance_factor
+        return max(min_height, min(scaled_height, max_height))
 ```
 
 # lib/style/style_manager.py
 
 ```py
 # lib/style/style_manager.py
+from typing import Dict, Any, Optional
+from ..config import Config
 from .building_merger import BuildingMerger
 from .height_manager import HeightManager
 from .artistic_effects import ArtisticEffects
 from .block_combiner import BlockCombiner
 
-
 class StyleManager:
-    def __init__(self, style_settings=None):
-        # Initialize default style settings
-        self.style = {
-            "merge_distance": 2.0,
-            "cluster_size": 3.0,
-            "height_variance": 0.2,
-            "detail_level": 1.0,
-            "artistic_style": "modern",
-            "min_building_area": 600.0,
-        }
-
+    """
+    Manages style settings and coordinates style-related components for the city model.
+    Uses centralized configuration for consistent styling across the application.
+    """
+    
+    def __init__(self, style_settings: Optional[Dict[str, Any]] = None):
+        """
+        Initialize style manager with optional custom settings.
+        
+        Args:
+            style_settings: Optional dictionary of style settings to override defaults
+        """
+        # Initialize with default style settings
+        self.style = dict(Config.DEFAULT_STYLE)
+        
         # Override defaults with provided settings
         if style_settings:
-            self.style.update(style_settings)
-
-        # Initialize components
+            self._validate_and_update_style(style_settings)
+            
+        # Initialize style components
         self.building_merger = BuildingMerger(self)
         self.height_manager = HeightManager(self)
         self.artistic_effects = ArtisticEffects(self)
         self.block_combiner = BlockCombiner(self)
         self.current_features = {}
 
-    def get_default_layer_specs(self):
-        """Get default layer specifications."""
-        return {
-            "water": {"depth": 2.4},
-            "roads": {"depth": 0.4, "width": 1.0},
-            "railways": {"depth": 0.6, "width": 1.5},
-            "parks": {
-                "start_offset": 0.2,  # top of base + 0.2
-                "thickness": 0.4
-            },
-            "buildings": {"min_height": 2, "max_height": 8},
-            "base": {"height": 3},
-        }
+    def _validate_and_update_style(self, settings: Dict[str, Any]) -> None:
+        """
+        Validate and update style settings.
+        
+        Args:
+            settings: Dictionary of style settings to validate and apply
+        """
+        for key, value in settings.items():
+            if key in Config.DEFAULT_STYLE:
+                if key == 'artistic_style' and value not in Config.ARTISTIC_STYLES:
+                    raise ValueError(f"Invalid artistic style: {value}. Must be one of {Config.ARTISTIC_STYLES}")
+                self.style[key] = value
 
-    def scale_building_height(self, properties):
-        """Scale building height using HeightManager."""
+    def get_default_layer_specs(self) -> Dict[str, Any]:
+        """
+        Get default layer specifications from config.
+        
+        Returns:
+            Dictionary containing layer specifications
+        """
+        return dict(Config.DEFAULT_LAYER_SPECS)
+
+    def scale_building_height(self, properties: Dict[str, Any]) -> float:
+        """
+        Scale building height using HeightManager.
+        
+        Args:
+            properties: Dictionary of building properties
+            
+        Returns:
+            Scaled height value
+        """
         return self.height_manager.scale_height(properties)
 
-    def merge_nearby_buildings(self, buildings, barrier_union=None):
-        """Choose merging strategy based on style."""
+    def merge_nearby_buildings(self, buildings: list, barrier_union=None) -> list:
+        """
+        Choose and execute building merging strategy based on style.
+        
+        Args:
+            buildings: List of building features
+            barrier_union: Optional union of barrier geometries
+            
+        Returns:
+            List of processed building features
+        """
         if self.style["artistic_style"] == "block-combine":
-            # This calls our new block combiner code
             return self.block_combiner.combine_buildings_by_block(self.current_features)
         else:
-            # Original distance-based approach
             return self.building_merger.merge_buildings(buildings, barrier_union)
 
-    def set_current_features(self, features):
-        """Store current features."""
+    def set_current_features(self, features: Dict[str, list]) -> None:
+        """
+        Store current features for reference by style components.
+        
+        Args:
+            features: Dictionary of feature collections by type
+        """
         self.current_features = features
 
+    def get_industrial_height_multiplier(self, building_type: str) -> float:
+        """
+        Get height multiplier for industrial building type.
+        
+        Args:
+            building_type: Type of industrial building
+            
+        Returns:
+            Height multiplier value
+        """
+        return Config.get_industrial_height_multiplier(building_type)
+
+    def get_road_width(self, road_type: str) -> float:
+        """
+        Get width multiplier for road type.
+        
+        Args:
+            road_type: Type of road
+            
+        Returns:
+            Road width multiplier
+        """
+        return Config.get_road_width(road_type)
+
+    def get_roof_style_params(self, style_name: str) -> Dict[str, Any]:
+        """
+        Get parameters for a specific roof style.
+        
+        Args:
+            style_name: Name of the roof style
+            
+        Returns:
+            Dictionary of roof style parameters
+        """
+        return Config.ROOF_STYLES.get(style_name, {})
+
+    def get_processing_settings(self) -> Dict[str, Any]:
+        """
+        Get current processing settings based on style.
+        
+        Returns:
+            Dictionary of processing settings
+        """
+        settings = dict(Config.PROCESSING_SETTINGS)
+        # Adjust settings based on current style
+        if self.style["artistic_style"] == "block-combine":
+            settings["area_threshold"] = max(
+                settings["area_threshold"],
+                self.style.get("min_building_area", 600.0)
+            )
+        return settings
 ```
 
 # public/css/style.css
@@ -2806,6 +3612,49 @@ body {
   display: none;
   color: #007bff;
   margin-bottom: 10px;
+}
+
+/* Enhanced log styling */
+.log-window {
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.9em;
+}
+
+.log-entry {
+  margin: 2px 0;
+  padding: 4px;
+  border-left: 3px solid transparent;
+}
+
+.log-info { color: #cfcfcf; border-color: #4a90e2; }
+.log-warning { color: #ffd700; border-color: #ffd700; }
+.log-error { color: #ff4444; border-color: #ff4444; }
+
+.stat-card {
+  background: #f8f9fa;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 5px;
+  min-width: 120px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.stat-value {
+  font-size: 1.4em;
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.stat-label {
+  font-size: 0.8em;
+  color: #7f8c8d;
+  text-transform: uppercase;
 }
 ```
 
