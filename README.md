@@ -232,6 +232,16 @@ If you encounter issues:
 2. Check the generated log file (`*.log`)
 3. Verify OpenSCAD installation
 4. Ensure all dependencies are installed
+## Docker Deployment
+
+The repository includes a `docker-compose.yml` file that reads the port from the `.env` file. Set the desired port (default `3123`) in `.env` and then build and start the service:
+
+```bash
+docker-compose up --build
+```
+
+The application will be available at `http://localhost:3123`.
+
 
 ## Contributing
 
