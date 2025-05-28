@@ -4,3 +4,6 @@ codebase.md
 node_modules/
 outputs/
 uploads/
+Regions/
+lib/__pycache__/
+lib/feature_processor/__pycache__/
