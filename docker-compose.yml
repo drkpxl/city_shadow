@@ -1,0 +1,11 @@
+version: '3'
+services:
+  app:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
