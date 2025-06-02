@@ -1,0 +1,26 @@
+{
+  "verbose": true,
+  "ignore": [
+    "*.test.js",
+    "node_modules/*",
+    "uploads/*",
+    "outputs/*",
+    "temp/*",
+    "*.geojson",
+    "*.scad",
+    "*.stl",
+    "*.png",
+    "*.log"
+  ],
+  "watch": [
+    "server.js",
+    "lib/jobManager.js",
+    "lib/processManager.js",
+    "views/",
+    "public/"
+  ],
+  "ext": "js,json,ejs,css",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
