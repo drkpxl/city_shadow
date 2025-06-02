@@ -13,9 +13,16 @@ class ScadGenerator:
         Generate complete OpenSCAD code for main model (excluding frame).
         We 'union' buildings, bridges, and parks, then 'difference' roads/water/rail.
         """
+        # Get roof styles for display
+        roof_styles = self.style_manager.style.get('roof_styles', None)
+        if roof_styles and isinstance(roof_styles, list):
+            roof_style_display = ', '.join(roof_styles)
+        else:
+            roof_style_display = self.style_manager.style.get('roof_style', 'mixed')
+            
         scad = [
             f"""// Generated with Enhanced City Converter
-// Style: {self.style_manager.style['artistic_style']}
+// Roof Styles: {roof_style_display}
 // Detail Level: {self.style_manager.style['detail_level']}
 
 difference() {{
@@ -58,8 +65,8 @@ difference() {{
             roof_params = building.get("roof_params")
             is_cluster = building.get("is_cluster", False)
 
-            # Generate the building details with explicit roof style if it's a cluster
-            if is_cluster and roof_style and roof_params:
+            # Generate the building details with roof style for all buildings
+            if roof_style and roof_params:
                 details = self.building_generator.generate_building_details(
                     points_str=points_str,
                     height=building_height,
@@ -67,6 +74,7 @@ difference() {{
                     roof_params=roof_params
                 )
             else:
+                # Fallback to basic building if no roof style specified
                 details = self.building_generator.generate_building_details(
                     points_str=points_str,
                     height=building_height

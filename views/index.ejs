@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
 
 </head>
@@ -60,13 +62,62 @@
               <input type="number" class="form-control live-preview" id="height" name="height" value="20" required>
             </div>
             <div class="form-group">
-              <label for="style">Artistic Style</label>
-              <select class="form-control live-preview" id="style" name="style">
-                <option value="modern">Modern</option>
-                <option value="classic">Classic</option>
-                <option value="minimal">Minimal</option>
-                <option value="block-combine" selected>Block Combine</option>
-              </select>
+              <label>
+                Roof Styles
+                <span class="tooltip-icon" data-toggle="tooltip" data-placement="right" 
+                      title="Select one or more roof styles. Buildings will randomly use one of the selected styles.">ⓘ</span>
+              </label>
+              <div class="roof-style-container border rounded p-3">
+                <div class="form-check">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="flat" id="roof-flat">
+                  <label class="form-check-label" for="roof-flat">
+                    Flat
+                    <small class="text-muted">- Modern flat roofs with clean lines</small>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="pitched" id="roof-pitched">
+                  <label class="form-check-label" for="roof-pitched">
+                    Pitched
+                    <small class="text-muted">- Traditional peaked roofs with two sloping sides</small>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="tiered" id="roof-tiered">
+                  <label class="form-check-label" for="roof-tiered">
+                    Tiered
+                    <small class="text-muted">- Multi-level roofs that step down</small>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="sawtooth" id="roof-sawtooth">
+                  <label class="form-check-label" for="roof-sawtooth">
+                    Sawtooth
+                    <small class="text-muted">- Industrial-style roofs with angled slopes</small>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="modern" id="roof-modern">
+                  <label class="form-check-label" for="roof-modern">
+                    Modern
+                    <small class="text-muted">- Contemporary roofs with setbacks</small>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="stepped" id="roof-stepped">
+                  <label class="form-check-label" for="roof-stepped">
+                    Stepped
+                    <small class="text-muted">- Roofs with distinct stepped levels</small>
+                  </label>
+                </div>
+                <div class="mt-2">
+                  <button type="button" class="btn btn-sm btn-secondary" id="select-all-roofs">Select All</button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="clear-all-roofs">Clear All</button>
+                </div>
+              </div>
+              <small class="form-text text-muted">
+                <span id="roof-style-description">Select at least one roof style</span>
+              </small>
             </div>
             <div class="form-group">
               <label for="detail">Detail Level (0-2)</label>
@@ -168,6 +219,61 @@
   </div>
 
   <script>
+    // Initialize tooltips
+    $(document).ready(function() {
+      $('[data-toggle="tooltip"]').tooltip();
+      
+      // Select all roof styles by default
+      $('.roof-style-checkbox').prop('checked', true);
+      updateRoofStyleDescription();
+    });
+
+    // Handle select all button
+    $('#select-all-roofs').on('click', function() {
+      $('.roof-style-checkbox').prop('checked', true);
+      updateRoofStyleDescription();
+      debouncedUpdatePreview();
+    });
+
+    // Handle clear all button
+    $('#clear-all-roofs').on('click', function() {
+      $('.roof-style-checkbox').prop('checked', false);
+      updateRoofStyleDescription();
+    });
+
+    // Update description when checkboxes change
+    $('.roof-style-checkbox').on('change', function() {
+      updateRoofStyleDescription();
+    });
+
+    function updateRoofStyleDescription() {
+      const selectedStyles = $('.roof-style-checkbox:checked').map(function() {
+        return $(this).val();
+      }).get();
+
+      if (selectedStyles.length === 0) {
+        $('#roof-style-description').text('Please select at least one roof style');
+        $('#roof-style-description').addClass('text-danger');
+      } else if (selectedStyles.length === 1) {
+        $('#roof-style-description').text(`All buildings will use ${selectedStyles[0]} roof style`);
+        $('#roof-style-description').removeClass('text-danger');
+      } else if (selectedStyles.length === 6) {
+        $('#roof-style-description').text('All roof styles selected - buildings will use random styles');
+        $('#roof-style-description').removeClass('text-danger');
+      } else {
+        $('#roof-style-description').text(`Buildings will randomly use: ${selectedStyles.join(', ')}`);
+        $('#roof-style-description').removeClass('text-danger');
+      }
+    }
+
+    // Helper function to get selected roof styles
+    function getSelectedRoofStyles() {
+      const styles = $('.roof-style-checkbox:checked').map(function() {
+        return $(this).val();
+      }).get();
+      return styles.length > 0 ? styles.join(',') : 'flat'; // Default to flat if none selected
+    }
+
     // Initialize Socket.io connection
     const socket = io();
     let currentJobId = null;
@@ -235,6 +341,9 @@
 
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
+      
+      // Add selected roof styles
+      formData.push({ name: "roof-style", value: getSelectedRoofStyles() });
 
       $.ajax({
         url: "/preview",
@@ -336,6 +445,9 @@
       updateLog("Generating final render...");
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: uploadedFile });
+      
+      // Add selected roof styles
+      formData.push({ name: "roof-style", value: getSelectedRoofStyles() });
 
       $.ajax({
         url: "/render",

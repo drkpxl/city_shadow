@@ -105,7 +105,7 @@ io.on("connection", (socket) => {
 const OPTION_CONFIG = [
   { bodyKey: "size", cliFlag: "--size" },
   { bodyKey: "height", cliFlag: "--height" },
-  { bodyKey: "style", cliFlag: "--style" },
+  { bodyKey: "roof-style", cliFlag: "--roof-style" },
   { bodyKey: "detail", cliFlag: "--detail" },
   { bodyKey: "merge-distance", cliFlag: "--merge-distance" },
   { bodyKey: "cluster-size", cliFlag: "--cluster-size" },

@@ -73,7 +73,8 @@ class Config:
         'cluster_size': 3.0,
         'height_variance': 0.2,
         'detail_level': 1.0,
-        'artistic_style': 'modern',
+        'artistic_style': 'modern',  # Kept for backward compatibility
+        'roof_style': 'mixed',  # New default roof style
         'min_building_area': 200.0
     }
 

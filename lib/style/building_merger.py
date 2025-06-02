@@ -93,6 +93,7 @@ class BuildingMerger:
         total_area = 0.0
         weighted_height = 0.0
         all_coords = []
+        roof_styles = []
 
         for b in cluster:
             coords = b["coords"]
@@ -100,6 +101,8 @@ class BuildingMerger:
             total_area += area
             weighted_height += b["height"] * area
             all_coords.extend(coords)
+            if "roof_style" in b:
+                roof_styles.append(b["roof_style"])
 
         avg_height = (
             weighted_height / total_area if total_area > 0 else cluster[0]["height"]
@@ -108,9 +111,69 @@ class BuildingMerger:
             all_coords
         )
 
-        return {
+        # Determine roof style for merged cluster
+        # Use the most common style, or pick a random one if they're all different
+        if roof_styles:
+            from collections import Counter
+            style_counts = Counter(roof_styles)
+            most_common = style_counts.most_common(1)[0][0]
+            roof_style = most_common
+            # Use the same params as the first building with this style
+            for b in cluster:
+                if b.get("roof_style") == roof_style and "roof_params" in b:
+                    roof_params = b["roof_params"]
+                    break
+            else:
+                # Generate new params if needed
+                import random
+                if roof_style == 'pitched':
+                    roof_params = {'height_factor': random.uniform(0.2, 0.4)}
+                elif roof_style == 'tiered':
+                    roof_params = {'levels': random.randint(2, 4)}
+                elif roof_style == 'flat':
+                    roof_params = {'border': random.uniform(0.8, 1.2)}
+                elif roof_style == 'sawtooth':
+                    roof_params = {'angle': random.randint(25, 35)}
+                elif roof_style == 'modern':
+                    roof_params = {'setback': random.uniform(1.8, 2.2)}
+                elif roof_style == 'stepped':
+                    roof_params = {'levels': random.randint(2, 4)}
+                else:
+                    roof_params = {}
+        else:
+            # If no roof styles in cluster, check if we have a list of allowed styles
+            available_styles = self.style_manager.style.get('roof_styles', None)
+            if available_styles and isinstance(available_styles, list):
+                import random
+                roof_style = random.choice(available_styles)
+                # Generate params for the selected style
+                if roof_style == 'pitched':
+                    roof_params = {'height_factor': random.uniform(0.2, 0.4)}
+                elif roof_style == 'tiered':
+                    roof_params = {'levels': random.randint(2, 4)}
+                elif roof_style == 'flat':
+                    roof_params = {'border': random.uniform(0.8, 1.2)}
+                elif roof_style == 'sawtooth':
+                    roof_params = {'angle': random.randint(25, 35)}
+                elif roof_style == 'modern':
+                    roof_params = {'setback': random.uniform(1.8, 2.2)}
+                elif roof_style == 'stepped':
+                    roof_params = {'levels': random.randint(2, 4)}
+                else:
+                    roof_params = {}
+            else:
+                roof_style = None
+                roof_params = None
+
+        result = {
             "coords": hull_coords,
             "height": avg_height,
             "is_cluster": True,
             "size": len(cluster),
         }
+        
+        if roof_style:
+            result["roof_style"] = roof_style
+            result["roof_params"] = roof_params
+            
+        return result

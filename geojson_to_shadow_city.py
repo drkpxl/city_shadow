@@ -23,10 +23,10 @@ def main():
         "--height", type=float, default=20, help="Maximum height in mm (default: 20)"
     )
     parser.add_argument(
-        "--style",
-        choices=["modern", "classic", "minimal", "block-combine"],
-        default="modern",
-        help="Artistic style",
+        "--roof-style",
+        type=str,
+        default="flat,pitched,tiered,sawtooth,modern,stepped",
+        help="Comma-separated list of roof styles to use",
     )
     parser.add_argument(
         "--detail", type=float, default=1.0, help="Detail level 0-2 (default: 1.0)"
@@ -112,9 +112,24 @@ def main():
     try:
         emit_progress(0, "Starting conversion process")
         
+        # Parse and validate roof styles
+        valid_roof_styles = ["flat", "pitched", "tiered", "sawtooth", "modern", "stepped"]
+        roof_styles = [style.strip() for style in args.roof_style.split(",") if style.strip()]
+        
+        # Validate roof styles
+        invalid_styles = [style for style in roof_styles if style not in valid_roof_styles]
+        if invalid_styles:
+            parser.error(f"Invalid roof styles: {', '.join(invalid_styles)}")
+        
+        # If no valid styles provided, use all styles
+        if not roof_styles:
+            roof_styles = valid_roof_styles
+            
+        print(f"Using roof styles: {', '.join(roof_styles)}", flush=True)
+        
         # Prepare style settings; detailed logs are only enabled if --debug is passed.
         style_settings = {
-            "artistic_style": args.style,
+            "roof_styles": roof_styles,  # Pass as list
             "detail_level": args.detail,
             "merge_distance": args.merge_distance,
             "cluster_size": args.cluster_size,

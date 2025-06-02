@@ -45,6 +45,12 @@ class StyleManager:
                 if key == 'artistic_style' and value not in Config.ARTISTIC_STYLES:
                     raise ValueError(f"Invalid artistic style: {value}. Must be one of {Config.ARTISTIC_STYLES}")
                 self.style[key] = value
+            elif key == 'roof_style':
+                # Handle the new roof_style parameter (backward compatibility)
+                self.style['roof_style'] = value
+            elif key == 'roof_styles':
+                # Handle the new roof_styles list parameter
+                self.style['roof_styles'] = value
 
     def get_default_layer_specs(self) -> Dict[str, Any]:
         """
@@ -78,10 +84,8 @@ class StyleManager:
         Returns:
             List of processed building features
         """
-        if self.style["artistic_style"] == "block-combine":
-            return self.block_combiner.combine_buildings_by_block(self.current_features)
-        else:
-            return self.building_merger.merge_buildings(buildings, barrier_union)
+        # Always use simple building merger now that we have explicit roof styles
+        return self.building_merger.merge_buildings(buildings, barrier_union)
 
     def set_current_features(self, features: Dict[str, list]) -> None:
         """
