@@ -63,7 +63,6 @@ const OPTION_CONFIG = [
 
 const buildPythonArgs = (inputFile, outputFile, body) => {
   const args = [
-    path.join(__dirname, "geojson_to_shadow_city.py"),
     inputFile,
     outputFile,
   ];
@@ -86,21 +85,34 @@ const buildPythonArgs = (inputFile, outputFile, body) => {
 // Run Python process in unbuffered mode and capture logs.
 const runPythonProcess = (args) => {
   return new Promise((resolve, reject) => {
+    console.log(`[Python] Executing: python3 -u geojson_to_shadow_city.py ${args.join(' ')}`);
+    
     // Use "-u" flag to force unbuffered output.
-    const pythonProcess = spawn("python3", ["-u", ...args]);
+    const pythonProcess = spawn("python3", ["-u", "geojson_to_shadow_city.py", ...args]);
     let stdoutData = "";
     let stderrData = "";
 
     pythonProcess.stdout.on("data", (data) => {
-      stdoutData += data.toString();
+      const output = data.toString();
+      console.log(`[Python stdout]: ${output.trim()}`);
+      stdoutData += output;
     });
+    
     pythonProcess.stderr.on("data", (data) => {
-      stderrData += data.toString();
+      const output = data.toString();
+      console.log(`[Python stderr]: ${output.trim()}`);
+      stderrData += output;
+    });
+
+    pythonProcess.on("error", (err) => {
+      console.error(`[Python] Process error:`, err);
+      reject(`Failed to start Python process: ${err.message}`);
     });
 
     pythonProcess.on("close", (code) => {
+      console.log(`[Python] Process exited with code ${code}`);
       if (code !== 0) {
-        reject(stderrData);
+        reject(stderrData || `Python process exited with code ${code}`);
       } else {
         resolve({ stdout: stdoutData, stderr: stderrData });
       }
@@ -117,6 +129,7 @@ app.post("/uploadFile", upload.single("geojson"), (req, res) => {
 
 app.post("/preview", async (req, res) => {
   try {
+    console.log(`[Preview] Request received with file: ${req.body.uploadedFile}`);
     const outputBase = `preview-${Date.now()}-${uuidv4()}`;
     const outputScad = path.join("outputs", `${outputBase}.scad`);
 
@@ -132,7 +145,12 @@ app.post("/preview", async (req, res) => {
       stderr: result.stderr,
     });
   } catch (error) {
-    res.status(500).json({ error: error.toString() });
+    console.error(`[Preview] Error:`, error);
+    res.status(500).json({ 
+      error: error.toString(),
+      stdout: error.stdout || '',
+      stderr: error.stderr || error.toString()
+    });
   }
 });
 
