@@ -207,6 +207,94 @@ app.post("/uploadFile", upload.single("geojson"), (req, res) => {
   res.json({ filePath: req.file.path });
 });
 
+app.post("/fetchOSMData", async (req, res) => {
+  try {
+    const { bbox, features } = req.body;
+    
+    if (!bbox || !bbox.south || !bbox.west || !bbox.north || !bbox.east) {
+      return res.status(400).json({ error: "Invalid bounding box" });
+    }
+    
+    // Create unique filename for the fetched data
+    const uniqueId = uuidv4();
+    const outputPath = path.join("uploads", `osm-data-${uniqueId}.geojson`);
+    
+    // Build arguments for Python script
+    const args = [
+      "fetch_osm_data.py",
+      "--south", bbox.south.toString(),
+      "--west", bbox.west.toString(),
+      "--north", bbox.north.toString(),
+      "--east", bbox.east.toString(),
+      "--output", outputPath
+    ];
+    
+    // Add feature flags
+    if (features.buildings) args.push("--buildings");
+    if (features.roads) args.push("--roads");
+    if (features.water) args.push("--water");
+    if (features.railways) args.push("--railways");
+    if (features.parks) args.push("--parks");
+    
+    console.log(`[Fetch OSM] Starting fetch for bbox: ${bbox.south},${bbox.west},${bbox.north},${bbox.east}`);
+    
+    // Run Python script
+    const pythonProcess = spawn("python", args, {
+      cwd: __dirname,
+      env: { ...process.env, PYTHONUNBUFFERED: "1" }
+    });
+    
+    let stdout = "";
+    let stderr = "";
+    
+    pythonProcess.stdout.on("data", (data) => {
+      stdout += data.toString();
+      console.log(`[Fetch OSM stdout]: ${data}`);
+    });
+    
+    pythonProcess.stderr.on("data", (data) => {
+      stderr += data.toString();
+      console.error(`[Fetch OSM stderr]: ${data}`);
+    });
+    
+    pythonProcess.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`[Fetch OSM] Failed with code ${code}`);
+        return res.status(500).json({
+          error: "Failed to fetch OSM data",
+          details: stderr || stdout
+        });
+      }
+      
+      // Check if file was created
+      if (!fs.existsSync(outputPath)) {
+        return res.status(500).json({
+          error: "Failed to create GeoJSON file",
+          details: "Output file not found"
+        });
+      }
+      
+      console.log(`[Fetch OSM] Successfully created: ${outputPath}`);
+      res.json({ filePath: outputPath });
+    });
+    
+    pythonProcess.on("error", (error) => {
+      console.error(`[Fetch OSM] Process error:`, error);
+      res.status(500).json({
+        error: "Failed to start OSM fetch process",
+        details: error.message
+      });
+    });
+    
+  } catch (error) {
+    console.error(`[Fetch OSM] Error:`, error);
+    res.status(500).json({
+      error: "Server error while fetching OSM data",
+      details: error.message
+    });
+  }
+});
+
 app.post("/preview", async (req, res) => {
   try {
     // Create a new job
