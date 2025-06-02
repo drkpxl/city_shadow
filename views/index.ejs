@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
 
 </head>
 
@@ -167,6 +168,39 @@
   </div>
 
   <script>
+    // Initialize Socket.io connection
+    const socket = io();
+    let currentJobId = null;
+
+    socket.on('connect', () => {
+      console.log('Connected to server');
+    });
+
+    socket.on('job-output', (data) => {
+      if (data.jobId === currentJobId) {
+        updateLog(data.data, data.type === 'stderr' ? 'error' : 'info');
+      }
+    });
+
+    socket.on('job-progress', (data) => {
+      if (data.jobId === currentJobId) {
+        updateLog(`Progress: ${data.progress}%`);
+        // Update progress bar if we add one later
+      }
+    });
+
+    socket.on('job-completed', (data) => {
+      if (data.jobId === currentJobId) {
+        updateLog('Job completed successfully!', 'success');
+      }
+    });
+
+    socket.on('job-failed', (data) => {
+      if (data.jobId === currentJobId) {
+        updateLog(`Job failed: ${data.error}`, 'error');
+      }
+    });
+
     // Clear log button
     $("#clearLogBtn").on("click", function () {
       $("#liveLog").empty();
@@ -207,21 +241,19 @@
         type: "POST",
         data: formData,
         success: function (data) {
+          // Subscribe to job updates
+          if (currentJobId) {
+            socket.emit('unsubscribe-job', currentJobId);
+          }
+          currentJobId = data.jobId;
+          socket.emit('subscribe-job', currentJobId);
+
           if (data.previewMain && data.previewFrame) {
             $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
             $("#previewFrame").attr("src", data.previewFrame + "?t=" + new Date().getTime()).show();
           }
 
-          var logText = "";
-          if (data.stdout) {
-            logText += data.stdout + "\n";
-          }
-          if (data.stderr) {
-            logText += data.stderr + "\n";
-          }
-          if (logText.trim().length > 0) {
-            updateLog(logText);
-          }
+          // Initial log output handled by socket events
         },
         error: function (err) {
           console.error("Error:", err);
@@ -310,6 +342,13 @@
         type: "POST",
         data: formData,
         success: function (data) {
+          // Subscribe to job updates
+          if (currentJobId) {
+            socket.emit('unsubscribe-job', currentJobId);
+          }
+          currentJobId = data.jobId;
+          socket.emit('subscribe-job', currentJobId);
+
           var linksHtml = "";
 
           if (data.mainScad) {
@@ -332,16 +371,7 @@
 
           $("#downloadLinks").html(linksHtml);
 
-          var logText = "";
-          if (data.stdout) {
-            logText += data.stdout + "\n";
-          }
-          if (data.stderr) {
-            logText += data.stderr + "\n";
-          }
-          if (logText.trim().length > 0) {
-            updateLog(logText);
-          }
+          // Initial log output handled by socket events
         },
         error: function (err) {
           console.error("Final render error:", err);

@@ -5,6 +5,10 @@ from lib.converter import EnhancedCityConverter
 from lib.preprocessor import GeoJSONPreprocessor
 from lib.preview.openscad_integration import OpenSCADIntegration
 
+def emit_progress(progress, message):
+    """Emit progress updates that can be parsed by the Node.js server"""
+    print(f"Progress: {progress}% - {message}", flush=True)
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert GeoJSON to artistic 3D city model"
@@ -106,6 +110,8 @@ def main():
     args = parser.parse_args()
 
     try:
+        emit_progress(0, "Starting conversion process")
+        
         # Prepare style settings; detailed logs are only enabled if --debug is passed.
         style_settings = {
             "artistic_style": args.style,
@@ -119,6 +125,8 @@ def main():
             "support_width": args.support_width,
         }
 
+        emit_progress(10, "Initializing converter")
+        
         # Create the converter and explicitly set debug based on the flag.
         converter = EnhancedCityConverter(
             size_mm=args.size, max_height_mm=args.height, style_settings=style_settings
@@ -127,6 +135,8 @@ def main():
         converter.layer_specs["roads"]["width"] = args.road_width
         converter.layer_specs["water"]["depth"] = args.water_depth
 
+        emit_progress(20, "Processing GeoJSON data")
+        
         # Process input data (with optional preprocessing)
         if args.preprocess:
             if not (args.crop_distance or args.crop_bbox):
@@ -135,9 +145,12 @@ def main():
                 bbox=args.crop_bbox, distance_meters=args.crop_distance
             )
             preprocessor.debug = args.debug
+            emit_progress(30, "Preprocessing GeoJSON data")
             converter.convert_preprocessed(args.input_json, args.output_scad, preprocessor)
         else:
             converter.convert(args.input_json, args.output_scad)
+        
+        emit_progress(50, "GeoJSON conversion completed")
 
         # Print a concise summary of processed features.
         print("\nConversion complete. Processed feature counts:", flush=True)
@@ -149,14 +162,18 @@ def main():
         integration = OpenSCADIntegration()
         preview_size = [1080, 1080]
         preview_file = args.output_scad.replace(".scad", "_preview.png")
+        emit_progress(60, "Generating preview image")
         print("\nGenerating preview image...", flush=True)
         integration.generate_preview(args.output_scad, preview_file, size=preview_size)
         print(f"Preview generated successfully: {preview_file}", flush=True)
+        emit_progress(80, "Preview generated")
 
         # Generate STL files.
+        emit_progress(85, "Generating STL files")
         print("\nGenerating STL files...", flush=True)
         stl_file = args.output_scad.replace(".scad", ".stl")
         integration.generate_stl(args.output_scad, stl_file)
+        emit_progress(100, "Conversion complete")
 
     except Exception as e:
         print(f"Error: {str(e)}", flush=True)
