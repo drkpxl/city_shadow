@@ -4,11 +4,11 @@ This is an old project where you can take BBOX data generate 3d printable citysc
 
 ## Critical Missing Components
 
-Based on GIStoLaser-fresh patterns analysis:
+Based on GIStoLaser-fresh patterns analysis: From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 ### 1. Leaflet Maps Integration
 
-From GIStoLaser-fresh implementation:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Uses Leaflet.js with OpenStreetMap tiles in `webapp/views/index.ejs`
 - Includes square bbox selection tool with visual feedback
@@ -26,7 +26,7 @@ From GIStoLaser-fresh implementation:
 
 ### 2. Overpass API Integration
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Uses `osmnx` Python library for Overpass queries
 - Smart data source selection (local PBF vs Overpass)
@@ -42,7 +42,7 @@ From GIStoLaser-fresh:
 
 ### 3. Boundary Clipping
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Uses `gpd.clip()` to ensure features don't exceed bbox
 - Creates cutline polygon from bbox coordinates
@@ -72,7 +72,7 @@ From GIStoLaser-fresh `webapp/config.yaml`:
 
 ### 5. GitHub Authentication
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Login, marketing, FAQ, legal pages
 - Uses passport.js with passport-github2 strategy
@@ -89,7 +89,7 @@ From GIStoLaser-fresh:
 
 ### 6. Job History/Management
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Stores job parameters in `params.json` per job
 - UUID-based job folders
@@ -105,7 +105,7 @@ From GIStoLaser-fresh:
 
 ### 7. Parameter Validation
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Comprehensive parameter configuration with min/max values
 - Type checking (number, integer, boolean)
@@ -121,7 +121,7 @@ From GIStoLaser-fresh:
 
 ### 8. File Cleanup
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Periodic cleanup of temp files
 - Preserves params.json for history
@@ -167,7 +167,7 @@ From GIStoLaser-fresh:
 
 ### 1. OSM Data Caching
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Uses local PBF files for US states
 - Smart selection between local and API
@@ -189,7 +189,7 @@ From GIStoLaser-fresh:
 
 ### 3. Frontend Styling
 
-From GIStoLaser-fresh:
+From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 - Bootstrap-based responsive design
 - Card-based layout for controls
