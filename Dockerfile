@@ -14,6 +14,9 @@ RUN apt-get update && \
 # Install Python and pip
 RUN apt-get install -y python3 python3-pip
 
+# Check Python and pip versions
+RUN python3 --version && pip3 --version
+
 # Install system dependencies for GeoPandas and related libraries
 RUN apt-get update && apt-get install -y gdal-bin libgdal-dev libgeos-dev python3-gdal python3-rtree --no-install-recommends
 
