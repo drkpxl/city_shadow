@@ -1,5 +1,5 @@
 # Use the OpenSCAD nightly image based on Debian Bookworm
-FROM openscad/openscad:master-nightly-debian
+FROM openscad/openscad:bookworm
 
 # Install Node.js (version 20)
 RUN apt-get update && \
