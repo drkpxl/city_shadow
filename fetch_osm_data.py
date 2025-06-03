@@ -64,6 +64,10 @@ def build_overpass_query(bbox: Tuple[float, float, float, float], features: Dict
         query_parts.extend([
             f'  way["natural"="water"]({bbox_str});',
             f'  relation["natural"="water"]({bbox_str});',
+            f'  way["natural"="bay"]({bbox_str});',
+            f'  relation["natural"="bay"]({bbox_str});',
+            f'  way["water"="bay"]({bbox_str});',
+            f'  relation["water"="bay"]({bbox_str});',
             f'  way["waterway"]({bbox_str});',
             f'  relation["waterway"]({bbox_str});',
             f'  way["waterway"="riverbank"]({bbox_str});',
