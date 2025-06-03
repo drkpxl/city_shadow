@@ -1,47 +1,35 @@
-# Use the OpenSCAD nightly image based on Debian Bookworm
-FROM openscad/openscad:latest
+FROM node:22-bookworm-slim
 
-# Install Node.js (version 20)
+# Install system dependencies:
+# Python, pip, venv, python-dev for building Python packages
+# wget, gnupg for adding OpenSCAD repository
+# OpenSCAD itself
+# GDAL, GEOS, etc., for GeoPandas
+# build-essential, gcc, g++ for compiling (will be removed later)
+# curl, ca-certificates (general utilities, may be needed by npm or other tools)
 RUN apt-get update && \
-    apt-get install -y ca-certificates curl gnupg && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    NODE_MAJOR=20 && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-dev \
+        wget \
+        gnupg \
+        gdal-bin \
+        libgdal-dev \
+        libgeos-dev \
+        # python3-gdal python3-rtree # Let's try installing these via pip first within the venv
+        build-essential \
+        gcc \
+        g++ \
+        curl \
+        ca-certificates && \
+    # Install OpenSCAD from OBS repository
+    wget -qO- https://files.openscad.org/OBS-Repository-Key.pub | tee /etc/apt/trusted.gpg.d/obs-openscad-nightly.asc && \
+    echo "deb https://download.opensuse.org/repositories/home:/t-paul/Debian_12/ ./" | tee /etc/apt/sources.list.d/openscad.list && \
     apt-get update && \
-    apt-get install nodejs -y
+    apt-get install -y openscad --no-install-recommends && \
+    # Clean up apt cache
+    rm -rf /var/lib/apt/lists/*
 
-# Install Python and pip
-RUN apt-get install -y python3 python3-pip
-
-# Check Python and pip versions
-RUN python3 --version && pip3 --version
-
-# Install system dependencies for GeoPandas and related libraries
-RUN apt-get update && apt-get install -y gdal-bin libgdal-dev libgeos-dev python3-gdal python3-rtree --no-install-recommends
-
-# Set the working directory
-WORKDIR /app
-
-# Copy package.json and package-lock.json
-COPY package*.json ./
-
-# Install Node.js dependencies
-RUN npm install
-
-# Copy requirements.txt
-COPY requirements.txt ./
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Copy the rest of the application code
-COPY . .
-
-# Expose the application port (default to 3000 if not set in .env)
-ARG PORT=3000
-ENV PORT=${PORT}
-EXPOSE ${PORT}
-
-# Start the application
-CMD ["npm", "start"]
+# (Further steps will be added here: creating user, venv, pip install, npm install, etc.)
