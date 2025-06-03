@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>TerrainForge3D Frontend</title>
+  <title>TerrainForge3D</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <!-- Leaflet CSS -->
@@ -22,6 +22,19 @@
 </head>
 
 <body>
+  <!-- Navigation Bar -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-light">
+    <div class="container">
+      <a class="navbar-brand" href="/">TerrainForge3D</a>
+      <div class="navbar-nav ml-auto">
+        <span class="navbar-text mr-3">
+          Welcome, <%= user.displayName || user.username %>
+        </span>
+        <a class="btn btn-outline-secondary btn-sm" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+  
   <div class="container">
     <h1 class="mt-5">TerrainForge3D</h1>
     <p class="lead">Select an area on the map and choose features to include. Live previews and downloadable outputs

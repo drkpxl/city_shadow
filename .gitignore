@@ -9,3 +9,8 @@ lib/__pycache__/
 lib/feature_processor/__pycache__/
 .DS_Store
 temp/
+.env
+venv/
+__pycache__/
+*.pyc
+cache/

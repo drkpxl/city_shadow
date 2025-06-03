@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
@@ -6,8 +8,13 @@ const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 const http = require("http");
 const { Server } = require("socket.io");
+const session = require('express-session');
+const passport = require('passport');
+const RedisStore = require('connect-redis').default;
+const { createClient } = require('redis');
 const JobManager = require("./lib/jobManager");
 const ProcessManager = require("./lib/processManager");
+const { initializeAuth, ensureAuthenticated, ensureNotAuthenticated } = require('./config/auth');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,6 +25,38 @@ const port = process.env.PORT || 3000;
 const jobManager = new JobManager();
 const processManager = new ProcessManager(5, 600000); // Max 5 concurrent, 10 min timeout
 jobManager.initialize().catch(console.error);
+
+// Initialize Redis client for sessions (optional)
+// Comment out Redis for now - will use in-memory sessions
+let sessionStore;
+// if (process.env.REDIS_URL) {
+//   const redisClient = createClient({
+//     url: process.env.REDIS_URL
+//   });
+//   redisClient.connect().catch(console.error);
+//   sessionStore = new RedisStore({ 
+//     client: redisClient,
+//     prefix: "terrainforge3d:" 
+//   });
+// }
+
+// Session configuration
+app.use(session({
+  store: sessionStore,
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
+initializeAuth(app);
 
 // Forward process events to Socket.io
 processManager.on('stdout', ({ jobId, data }) => {
@@ -200,14 +239,40 @@ const runPythonProcessWithJob = async (jobId, args) => {
   }
 };
 
-app.get("/", (req, res) => res.render("index"));
+// Public routes
+app.get("/login", ensureNotAuthenticated, (req, res) => {
+  res.render("pages/login", { user: null });
+});
 
-app.post("/uploadFile", upload.single("geojson"), (req, res) => {
+app.get("/auth/github", passport.authenticate("github", { scope: ["user:email"] }));
+
+app.get("/auth/github/callback",
+  passport.authenticate("github", { failureRedirect: "/login" }),
+  (req, res) => {
+    res.redirect("/");
+  }
+);
+
+app.get("/logout", (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      console.error("Logout error:", err);
+    }
+    res.redirect("/login");
+  });
+});
+
+// Protected routes
+app.get("/", ensureAuthenticated, (req, res) => {
+  res.render("index", { user: req.user });
+});
+
+app.post("/uploadFile", ensureAuthenticated, upload.single("geojson"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   res.json({ filePath: req.file.path });
 });
 
-app.post("/fetchOSMData", async (req, res) => {
+app.post("/fetchOSMData", ensureAuthenticated, async (req, res) => {
   try {
     const { bbox, features } = req.body;
     
@@ -295,10 +360,10 @@ app.post("/fetchOSMData", async (req, res) => {
   }
 });
 
-app.post("/preview", async (req, res) => {
+app.post("/preview", ensureAuthenticated, async (req, res) => {
   try {
     // Create a new job
-    const job = await jobManager.createJob("anonymous", {
+    const job = await jobManager.createJob(req.user.username || req.user.id, {
       type: "preview",
       ...req.body
     });
@@ -339,10 +404,10 @@ app.post("/preview", async (req, res) => {
   }
 });
 
-app.post("/render", async (req, res) => {
+app.post("/render", ensureAuthenticated, async (req, res) => {
   try {
     // Create a new job
-    const job = await jobManager.createJob("anonymous", {
+    const job = await jobManager.createJob(req.user.username || req.user.id, {
       type: "render",
       ...req.body
     });
@@ -384,7 +449,7 @@ app.post("/render", async (req, res) => {
 });
 
 // Job status endpoint
-app.get("/job/:jobId", (req, res) => {
+app.get("/job/:jobId", ensureAuthenticated, (req, res) => {
   const job = jobManager.getJob(req.params.jobId) || 
               jobManager.jobHistory.get(req.params.jobId);
   
