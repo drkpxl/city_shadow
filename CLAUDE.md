@@ -2,8 +2,6 @@
 
 This is an old project where you can take BBOX data generate 3d printable cityscapes. I am picking back up that likely needs some updating. There are many UI updates I want to make but I would like you to review, audit, and update this CLAUDE.MD with possible ways to accomplish the following:
 
-## Critical Missing Components
-
 Based on GIStoLaser-fresh patterns analysis: From GIStoLaser-fresh located here: /Users/stevenhubert/Code/GIStoLaser-fresh
 
 ### 6. Job History/Management
@@ -68,7 +66,9 @@ From GIStoLaser-fresh:
 - Send timeout status via socket.io
 - Show user-friendly error messages
 
-## Priority Tasks
+### Roads Sub-Options
+
+- Allow users to select specfic roads they may or may not want to include. Reference GIStoLaser for list of roads and display logic
 
 ### 1. Docker Setup Fix
 
