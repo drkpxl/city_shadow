@@ -52,6 +52,7 @@ class PreviewGenerator:
             "--imgsize",
             f"{size[0]},{size[1]}",
             "--autocenter",
+            "--viewall",
             "--colorscheme=DeepOcean",
         ]
 

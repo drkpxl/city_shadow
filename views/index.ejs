@@ -3,17 +3,19 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>Shadow City Generator Frontend</title>
+  <title>TerrainForge3D Frontend</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <!-- Leaflet JavaScript -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <!-- Proj4js for coordinate projections -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
@@ -21,8 +23,9 @@
 
 <body>
   <div class="container">
-    <h1 class="mt-5">Shadow City Generator</h1>
-    <p class="lead">Select an area on the map and choose features to include. Live previews and downloadable outputs will
+    <h1 class="mt-5">TerrainForge3D</h1>
+    <p class="lead">Select an area on the map and choose features to include. Live previews and downloadable outputs
+      will
       appear on the right.</p>
 
     <!-- Hidden field to store generated geojson file path -->
@@ -47,19 +50,23 @@
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">OSM Features to Include</legend>
             <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input feature-select" id="include-buildings" name="include-buildings" checked>
+              <input type="checkbox" class="form-check-input feature-select" id="include-buildings"
+                name="include-buildings" checked>
               <label class="form-check-label" for="include-buildings">Buildings</label>
             </div>
             <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input feature-select" id="include-roads" name="include-roads" checked>
+              <input type="checkbox" class="form-check-input feature-select" id="include-roads" name="include-roads"
+                checked>
               <label class="form-check-label" for="include-roads">Roads</label>
             </div>
             <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input feature-select" id="include-water" name="include-water" checked>
+              <input type="checkbox" class="form-check-input feature-select" id="include-water" name="include-water"
+                checked>
               <label class="form-check-label" for="include-water">Water Features</label>
             </div>
             <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input feature-select" id="include-railways" name="include-railways" checked>
+              <input type="checkbox" class="form-check-input feature-select" id="include-railways"
+                name="include-railways" checked>
               <label class="form-check-label" for="include-railways">Railways</label>
             </div>
             <div class="form-group form-check">
@@ -86,47 +93,53 @@
             <div class="form-group">
               <label>
                 Roof Styles
-                <span class="tooltip-icon" data-toggle="tooltip" data-placement="right" 
-                      title="Select one or more roof styles. Buildings will randomly use one of the selected styles.">ⓘ</span>
+                <span class="tooltip-icon" data-toggle="tooltip" data-placement="right"
+                  title="Select one or more roof styles. Buildings will randomly use one of the selected styles.">ⓘ</span>
               </label>
               <div class="roof-style-container border rounded p-3">
                 <div class="form-check">
-                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="flat" id="roof-flat">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="flat"
+                    id="roof-flat">
                   <label class="form-check-label" for="roof-flat">
                     Flat
                     <small class="text-muted">- Modern flat roofs with clean lines</small>
                   </label>
                 </div>
                 <div class="form-check">
-                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="pitched" id="roof-pitched">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="pitched"
+                    id="roof-pitched">
                   <label class="form-check-label" for="roof-pitched">
                     Pitched
                     <small class="text-muted">- Traditional peaked roofs with two sloping sides</small>
                   </label>
                 </div>
                 <div class="form-check">
-                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="tiered" id="roof-tiered">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="tiered"
+                    id="roof-tiered">
                   <label class="form-check-label" for="roof-tiered">
                     Tiered
                     <small class="text-muted">- Multi-level roofs that step down</small>
                   </label>
                 </div>
                 <div class="form-check">
-                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="sawtooth" id="roof-sawtooth">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="sawtooth"
+                    id="roof-sawtooth">
                   <label class="form-check-label" for="roof-sawtooth">
                     Sawtooth
                     <small class="text-muted">- Industrial-style roofs with angled slopes</small>
                   </label>
                 </div>
                 <div class="form-check">
-                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="modern" id="roof-modern">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="modern"
+                    id="roof-modern">
                   <label class="form-check-label" for="roof-modern">
                     Modern
                     <small class="text-muted">- Contemporary roofs with setbacks</small>
                   </label>
                 </div>
                 <div class="form-check">
-                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="stepped" id="roof-stepped">
+                  <input class="form-check-input roof-style-checkbox live-preview" type="checkbox" value="stepped"
+                    id="roof-stepped">
                   <label class="form-check-label" for="roof-stepped">
                     Stepped
                     <small class="text-muted">- Roofs with distinct stepped levels</small>
@@ -268,37 +281,37 @@
 
   <script>
     // Initialize tooltips
-    $(document).ready(function() {
+    $(document).ready(function () {
       $('[data-toggle="tooltip"]').tooltip();
-      
+
       // Select all roof styles by default
       $('.roof-style-checkbox').prop('checked', true);
       updateRoofStyleDescription();
-      
+
       // Initialize the map
       initializeMap();
     });
 
     // Handle select all button
-    $('#select-all-roofs').on('click', function() {
+    $('#select-all-roofs').on('click', function () {
       $('.roof-style-checkbox').prop('checked', true);
       updateRoofStyleDescription();
       // debouncedUpdatePreview(); // Removed automatic preview
     });
 
     // Handle clear all button
-    $('#clear-all-roofs').on('click', function() {
+    $('#clear-all-roofs').on('click', function () {
       $('.roof-style-checkbox').prop('checked', false);
       updateRoofStyleDescription();
     });
 
     // Update description when checkboxes change
-    $('.roof-style-checkbox').on('change', function() {
+    $('.roof-style-checkbox').on('change', function () {
       updateRoofStyleDescription();
     });
 
     function updateRoofStyleDescription() {
-      const selectedStyles = $('.roof-style-checkbox:checked').map(function() {
+      const selectedStyles = $('.roof-style-checkbox:checked').map(function () {
         return $(this).val();
       }).get();
 
@@ -319,7 +332,7 @@
 
     // Helper function to get selected roof styles
     function getSelectedRoofStyles() {
-      const styles = $('.roof-style-checkbox:checked').map(function() {
+      const styles = $('.roof-style-checkbox:checked').map(function () {
         return $(this).val();
       }).get();
       return styles.length > 0 ? styles.join(',') : 'flat'; // Default to flat if none selected
@@ -327,31 +340,31 @@
 
     // ========== MAP FUNCTIONALITY ==========
     let map, selecting = false, anchorLatLng = null, anchorMarker = null, rect = null, selectedBbox = null;
-    
+
     // Define projections
     proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
     proj4.defs("EPSG:3857", "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs");
-    
+
     function initializeMap() {
       // Initialize Leaflet map
       map = L.map('map').setView([40.7128, -74.0060], 12); // Default to NYC
-      
+
       // Add OpenStreetMap tiles
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       }).addTo(map);
-      
+
       // Handle map clicks for bbox selection
       map.on('click', handleMapClick);
     }
-    
+
     function handleMapClick(e) {
       if (!selecting) {
         // First click: set anchor
         anchorLatLng = e.latlng;
         selecting = true;
-        
+
         // Clear existing selection
         if (rect) {
           map.removeLayer(rect);
@@ -360,7 +373,7 @@
         if (anchorMarker) {
           map.removeLayer(anchorMarker);
         }
-        
+
         // Add anchor marker
         anchorMarker = L.marker(e.latlng, {
           icon: L.divIcon({
@@ -370,10 +383,10 @@
             iconAnchor: [10, 10]
           })
         }).addTo(map);
-        
+
         updateSelectionStatus('Click again to complete the square selection');
         $('#restart-selection, #clear-selection').show();
-        
+
         // Start listening to mouse moves
         map.on('mousemove', onMouseMove);
       } else {
@@ -383,11 +396,11 @@
         map.off('mousemove', onMouseMove);
       }
     }
-    
+
     function onMouseMove(e) {
       if (selecting && anchorLatLng) {
         let squareBounds = getSquareBounds(anchorLatLng, e.latlng);
-        
+
         if (rect) {
           rect.setBounds(squareBounds);
         } else {
@@ -397,28 +410,28 @@
             fillOpacity: 0.2
           }).addTo(map);
         }
-        
+
         updateBboxInput(squareBounds);
       }
     }
-    
+
     // Enable mousemove listener when selecting
     function startSelecting() {
       map.on('mousemove', onMouseMove);
     }
-    
+
     function getSquareBounds(anchor, mouse) {
       // Convert to Web Mercator for accurate distance calculations
       let anchorMerc = proj4("EPSG:4326", "EPSG:3857", [anchor.lng, anchor.lat]);
       let mouseMerc = proj4("EPSG:4326", "EPSG:3857", [mouse.lng, mouse.lat]);
-      
+
       // Calculate distances
       let dx = mouseMerc[0] - anchorMerc[0];
       let dy = mouseMerc[1] - anchorMerc[1];
-      
+
       // Use max dimension to create square
       let side = Math.max(Math.abs(dx), Math.abs(dy));
-      
+
       // Limit to 10 miles (16093.44 meters)
       const maxSide = 16093.44;
       if (side > maxSide) {
@@ -429,29 +442,29 @@
         const sideMiles = (side / 1609.34).toFixed(1);
         updateSelectionStatus(`Area: ${sideKm}km × ${sideKm}km (${sideMiles}mi × ${sideMiles}mi)`);
       }
-      
+
       // Calculate square corners
       let xSign = dx >= 0 ? 1 : -1;
       let ySign = dy >= 0 ? 1 : -1;
-      
+
       let otherMerc = [
         anchorMerc[0] + side * xSign,
         anchorMerc[1] + side * ySign
       ];
-      
+
       // Get bounds
       let minX = Math.min(anchorMerc[0], otherMerc[0]);
       let maxX = Math.max(anchorMerc[0], otherMerc[0]);
       let minY = Math.min(anchorMerc[1], otherMerc[1]);
       let maxY = Math.max(anchorMerc[1], otherMerc[1]);
-      
+
       // Convert back to lat/lng
       let sw = proj4("EPSG:3857", "EPSG:4326", [minX, minY]);
       let ne = proj4("EPSG:3857", "EPSG:4326", [maxX, maxY]);
-      
+
       return L.latLngBounds(L.latLng(sw[1], sw[0]), L.latLng(ne[1], ne[0]));
     }
-    
+
     function updateBboxInput(bounds) {
       if (bounds) {
         let sw = bounds.getSouthWest();
@@ -460,18 +473,18 @@
         let bboxString = `${sw.lat.toFixed(6)}, ${sw.lng.toFixed(6)}, ${ne.lat.toFixed(6)}, ${ne.lng.toFixed(6)}`;
         $('#crop-bbox').val(bboxString);
         selectedBbox = bounds;
-        
+
         // Enable fetch button
         $('#fetchDataBtn').prop('disabled', false);
         $('#fetchBtnText').text('Fetch OSM Data');
-        
+
         // Trigger preview update if data is already fetched
         if ($('#generatedFile').val()) {
           debouncedUpdatePreview();
         }
       }
     }
-    
+
     function updateSelectionStatus(message) {
       if (message) {
         $('#selection-status').text(message).show();
@@ -479,9 +492,9 @@
         $('#selection-status').hide();
       }
     }
-    
+
     // Button handlers
-    $('#restart-selection').on('click', function() {
+    $('#restart-selection').on('click', function () {
       selecting = false;
       if (rect) map.removeLayer(rect);
       if (anchorMarker) map.removeLayer(anchorMarker);
@@ -492,8 +505,8 @@
       $(this).hide();
       $('#clear-selection').hide();
     });
-    
-    $('#clear-selection').on('click', function() {
+
+    $('#clear-selection').on('click', function () {
       selecting = false;
       if (rect) map.removeLayer(rect);
       if (anchorMarker) map.removeLayer(anchorMarker);
@@ -504,19 +517,19 @@
       $(this).hide();
       $('#restart-selection').hide();
     });
-    
-    $('#copy-bbox').on('click', function() {
+
+    $('#copy-bbox').on('click', function () {
       const bboxValue = $('#crop-bbox').val();
       if (bboxValue) {
-        navigator.clipboard.writeText(bboxValue).then(function() {
+        navigator.clipboard.writeText(bboxValue).then(function () {
           updateSelectionStatus('Coordinates copied to clipboard!');
           setTimeout(() => updateSelectionStatus(''), 2000);
         });
       }
     });
-    
+
     // Handle manual bbox input changes
-    $('#crop-bbox').on('change', function() {
+    $('#crop-bbox').on('change', function () {
       const value = $(this).val().trim();
       if (value) {
         // Try to parse and display the bbox on the map
@@ -524,14 +537,14 @@
         if (coords.length === 4 && coords.every(c => !isNaN(c))) {
           const [south, west, north, east] = coords;
           const bounds = L.latLngBounds(L.latLng(south, west), L.latLng(north, east));
-          
+
           if (rect) map.removeLayer(rect);
           rect = L.rectangle(bounds, {
             color: 'blue',
             weight: 2,
             fillOpacity: 0.2
           }).addTo(map);
-          
+
           map.fitBounds(bounds);
           selectedBbox = bounds;
         }
@@ -611,7 +624,7 @@
 
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: generatedFile });
-      
+
       // Add selected roof styles
       formData.push({ name: "roof-style", value: getSelectedRoofStyles() });
 
@@ -631,13 +644,13 @@
             // Hide placeholder and show preview
             $("#previewPlaceholder").hide();
             $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
-            
+
             // Hide processing indicator
             $(".processing-indicator").hide();
-            
+
             // Re-enable button
             $("#generatePreviewBtn").prop('disabled', false).text('Generate Preview');
-            
+
             updateLog("Preview generated successfully!", "success");
           }
 
@@ -652,7 +665,7 @@
             errorMessage += err.statusText || "Unknown error";
           }
           updateLog(errorMessage, "error");
-          
+
           // Hide processing indicator and re-enable button
           $(".processing-indicator").hide();
           $("#generatePreviewBtn").prop('disabled', false).text('Generate Preview');
@@ -685,16 +698,16 @@
         updateLog("Please select an area on the map first", "error");
         return;
       }
-      
+
       const btn = $(this);
       const btnText = $("#fetchBtnText");
       const spinner = $("#fetchSpinner");
-      
+
       // Disable button and show spinner
       btn.prop('disabled', true);
       btnText.text('Fetching OSM data...');
       spinner.show();
-      
+
       // Get selected features
       const features = {
         buildings: $("#include-buildings").is(":checked"),
@@ -703,7 +716,7 @@
         railways: $("#include-railways").is(":checked"),
         parks: $("#include-parks").is(":checked")
       };
-      
+
       // Get bbox coordinates
       const sw = selectedBbox.getSouthWest();
       const ne = selectedBbox.getNorthEast();
@@ -713,9 +726,9 @@
         north: ne.lat,
         east: ne.lng
       };
-      
+
       updateLog("Fetching OSM data from Overpass API...");
-      
+
       $.ajax({
         url: "/fetchOSMData",
         type: "POST",
@@ -728,7 +741,7 @@
             updateLog("Click 'Generate Preview' to see a preview of your model", "info");
             // debouncedUpdatePreview(); // Removed automatic preview
           }
-          
+
           // Re-enable button
           btn.prop('disabled', false);
           btnText.text('Fetch OSM Data');
@@ -743,7 +756,7 @@
             errorMessage += err.statusText || "Unknown error";
           }
           updateLog(errorMessage, "error");
-          
+
           // Re-enable button
           btn.prop('disabled', false);
           btnText.text('Fetch OSM Data');
@@ -772,13 +785,13 @@
       }
 
       updateLog("Generating preview...");
-      
+
       // Disable button during generation
       $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status"></span> Generating...');
-      
+
       // Show processing indicator
       $(".processing-indicator").show();
-      
+
       // Call the preview update function
       updatePreview();
     });
@@ -794,7 +807,7 @@
       updateLog("Generating final render...");
       var formData = $("#optionsForm").serializeArray();
       formData.push({ name: "uploadedFile", value: generatedFile });
-      
+
       // Add selected roof styles
       formData.push({ name: "roof-style", value: getSelectedRoofStyles() });
 

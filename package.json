@@ -1,7 +1,7 @@
 {
   "name": "shadow-city-frontend",
   "version": "1.1.0",
-  "description": "Node frontend to interact with the Shadow City Generator command line tool",
+  "description": "Node frontend to interact with the TerrainForge3D command line tool",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

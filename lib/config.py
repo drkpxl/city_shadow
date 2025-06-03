@@ -2,7 +2,7 @@
 from typing import Dict, Any, List, Set
 
 class Config:
-    """Central configuration management for Shadow City Generator
+    """Central configuration management for TerrainForge3D
 
     This class defines all the key constants and default settings that control:
       • How features are recognized (buildings, water, roads, etc.)
