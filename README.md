@@ -170,6 +170,28 @@ Run the test suite:
 node test-job-system.js
 ```
 
+## Docker Deployment
+
+The project includes a Docker setup for running the service and a Redis instance.
+To build and run everything with Docker:
+
+```bash
+docker-compose up -d --build
+```
+
+Volume permissions can be corrected by running:
+
+```bash
+docker compose exec app /app/scripts/fix-permissions.sh
+```
+
+The Redis service listens on the port specified by `REDIS_PORT` in the `.env`
+file. The Node.js application will use the `REDIS_URL` variable defined there.
+
+The Dockerfile installs OpenSCAD via apt which provides the `Manifold` backend
+needed for fast STL generation. Verify that the installed version is 2021.01 or
+newer when deploying on your own base image.
+
 ## Future Enhancements
 
 - [ ] Authentication system for user management

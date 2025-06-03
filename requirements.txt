@@ -1,6 +1,6 @@
 # Core dependencies
-shapely>=2.0.0
-geopandas>=0.14.0  # For geospatial data manipulation and clipping
+shapely>=2.1.0
+geopandas>=0.14.2  # For geospatial data manipulation and clipping
 requests>=2.31.0  # For API calls
 pyproj>=3.6.0  # For coordinate transformations
 
