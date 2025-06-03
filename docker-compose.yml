@@ -1,10 +1,22 @@
+version: '3.8' # Specify a version for docker-compose
+
 services:
   app:
-    build: .
+    build: . # Build the image from the Dockerfile in the current directory
     env_file:
-      - .env
+      - .env # Load environment variables from .env file
     ports:
-      - "${PORT}:${PORT}"
+      - "${PORT}:${PORT}" # Map the host port to the container port (from .env)
     volumes:
-      - ./uploads:/app/uploads
-      - ./outputs:/app/outputs
+      - ./uploads:/app/uploads # Mount uploads directory
+      - ./outputs:/app/outputs # Mount outputs directory
+      - ./Regions:/app/Regions   # Mount Regions directory
+    # Add any necessary proxy configurations here for Cloudflare Tunnels
+    # For example, if you're using a local Cloudflare Tunnel client:
+    # networks:
+    #   - cloudflare_tunnel_network # Connect to a network shared with the tunnel client
+
+# Define networks if needed (e.g., for Cloudflare Tunnel)
+# networks:
+#   cloudflare_tunnel_network:
+#     external: true # If the network is managed externally
