@@ -15,7 +15,8 @@ const { createClient } = require('redis');
 const yaml = require('js-yaml');
 const JobManager = require("./lib/jobManager");
 const ProcessManager = require("./lib/processManager");
-const { initializeAuth, ensureAuthenticated, ensureNotAuthenticated } = require('./config/auth');
+const { initializeAuth, ensureAuthenticated, ensureNotAuthenticated, ensureAdmin } = require('./config/auth');
+const database = require('./lib/database');
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +27,9 @@ const port = process.env.PORT || 3000;
 const jobManager = new JobManager();
 const processManager = new ProcessManager(5, 600000); // Max 5 concurrent, 10 min timeout
 jobManager.initialize().catch(console.error);
+
+// Initialize database
+database.initialize().catch(console.error);
 
 // Load configuration
 let config = {};
@@ -293,6 +297,49 @@ app.get("/logout", (req, res) => {
   });
 });
 
+// Admin routes
+app.get("/admin", ensureAdmin, async (req, res) => {
+  try {
+    const users = await database.getAllUsers();
+    const recentModels = await database.getRecentModels();
+    
+    res.render("pages/admin", {
+      user: req.user,
+      config: config,
+      siteTitle: config.site?.title || "TerrainForge3D",
+      users: users,
+      recentModels: recentModels
+    });
+  } catch (error) {
+    console.error("Admin dashboard error:", error);
+    res.status(500).send("Error loading admin dashboard");
+  }
+});
+
+app.post("/admin/users/:userId/toggle-enabled", ensureAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { enabled } = req.body;
+    await database.toggleUserEnabled(userId, enabled);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Toggle user enabled error:", error);
+    res.status(500).json({ error: "Failed to update user status" });
+  }
+});
+
+app.post("/admin/users/:userId/toggle-admin", ensureAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { isAdmin } = req.body;
+    await database.setUserAdmin(userId, isAdmin);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Toggle admin error:", error);
+    res.status(500).json({ error: "Failed to update admin status" });
+  }
+});
+
 // Protected routes
 app.get("/", ensureAuthenticated, (req, res) => {
   res.render("index", { 
@@ -423,6 +470,32 @@ app.post("/preview", ensureAuthenticated, async (req, res) => {
       path.join(job.paths.outputDir, `${outputBase}_preview_frame.png`));
 
     const userId = req.user.username || req.user.id || 'anonymous';
+    
+    // Save preview as a model entry if it doesn't exist
+    if (req.user && req.user.id) {
+      try {
+        // Check if model exists for this job
+        const existingModel = await database.getModelsByUserId(req.user.id);
+        const jobModel = existingModel.find(m => m.job_id === job.id);
+        
+        if (!jobModel) {
+          // Create new model entry for preview
+          await database.createModel({
+            user_id: req.user.id,
+            job_id: job.id,
+            bbox: req.body.bbox || JSON.stringify(req.body.crop_bbox || {}),
+            parameters: req.body,
+            preview_url: `/temp/${userId}/${job.id}/output/${outputBase}_preview_main.png`,
+            stl_url: null,
+            scad_url: null,
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+          });
+        }
+      } catch (dbError) {
+        console.error("Failed to save preview to database:", dbError);
+      }
+    }
+    
     res.json({
       jobId: job.id,
       previewMain: `/temp/${userId}/${job.id}/output/${outputBase}_preview_main.png`,
@@ -469,6 +542,29 @@ app.post("/render", ensureAuthenticated, async (req, res) => {
       path.join(job.paths.outputDir, `${outputBase}_frame.stl`));
 
     const userId = req.user.username || req.user.id || 'anonymous';
+    
+    // Save model to database
+    if (req.user && req.user.id) {
+      try {
+        // Check if preview exists from a previous preview generation
+        const previewPath = path.join(job.paths.outputDir, `preview-${job.id}_preview_main.png`);
+        const hasPreview = fs.existsSync(previewPath);
+        
+        await database.createModel({
+          user_id: req.user.id,
+          job_id: job.id,
+          bbox: req.body.bbox || JSON.stringify(req.body.crop_bbox || {}),
+          parameters: req.body,
+          preview_url: hasPreview ? `/temp/${userId}/${job.id}/output/preview-${job.id}_preview_main.png` : null,
+          stl_url: `/temp/${userId}/${job.id}/output/${outputBase}_main.stl`,
+          scad_url: `/temp/${userId}/${job.id}/output/${outputBase}_main.scad`,
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+        });
+      } catch (dbError) {
+        console.error("Failed to save model to database:", dbError);
+      }
+    }
+    
     res.json({
       jobId: job.id,
       mainScad: `/temp/${userId}/${job.id}/output/${outputBase}_main.scad`,

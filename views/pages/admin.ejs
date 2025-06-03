@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - <%= siteTitle %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/"><%= siteTitle %></a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">Admin: <%= user.username %></span>
+                <a class="nav-link" href="/">Main App</a>
+                <a class="nav-link" href="/logout">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h1>Admin Dashboard</h1>
+        
+        <!-- User Management Section -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3>User Management</h3>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Avatar</th>
+                                <th>Username</th>
+                                <th>Display Name</th>
+                                <th>Email</th>
+                                <th>Models</th>
+                                <th>Last Login</th>
+                                <th>Status</th>
+                                <th>Admin</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% users.forEach(user => { %>
+                            <tr data-user-id="<%= user.id %>">
+                                <td>
+                                    <% if (user.avatar_url) { %>
+                                    <img src="<%= user.avatar_url %>" alt="<%= user.username %>" 
+                                         class="rounded-circle" style="width: 32px; height: 32px;">
+                                    <% } %>
+                                </td>
+                                <td><%= user.username %></td>
+                                <td><%= user.display_name || '-' %></td>
+                                <td><%= user.email || '-' %></td>
+                                <td><%= user.actual_model_count || 0 %></td>
+                                <td><%= user.last_login ? new Date(user.last_login).toLocaleString() : 'Never' %></td>
+                                <td>
+                                    <span class="badge bg-<%= user.is_enabled ? 'success' : 'danger' %>">
+                                        <%= user.is_enabled ? 'Enabled' : 'Disabled' %>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-<%= user.is_admin ? 'primary' : 'secondary' %>">
+                                        <%= user.is_admin ? 'Admin' : 'User' %>
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-<%= user.is_enabled ? 'warning' : 'success' %> toggle-enabled"
+                                            data-user-id="<%= user.id %>" 
+                                            data-enabled="<%= !user.is_enabled %>">
+                                        <%= user.is_enabled ? 'Disable' : 'Enable' %>
+                                    </button>
+                                    <button class="btn btn-sm btn-<%= user.is_admin ? 'secondary' : 'primary' %> toggle-admin"
+                                            data-user-id="<%= user.id %>" 
+                                            data-is-admin="<%= !user.is_admin %>">
+                                        <%= user.is_admin ? 'Remove Admin' : 'Make Admin' %>
+                                    </button>
+                                </td>
+                            </tr>
+                            <% }); %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Models Section -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3>Recent Models</h3>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>User</th>
+                                <th>Created</th>
+                                <th>Preview</th>
+                                <th>Files</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% recentModels.forEach(model => { %>
+                            <tr>
+                                <td><code><%= model.job_id %></code></td>
+                                <td><%= model.username %></td>
+                                <td><%= new Date(model.created_at).toLocaleString() %></td>
+                                <td>
+                                    <% if (model.preview_url) { %>
+                                    <a href="<%= model.preview_url %>" target="_blank" class="btn btn-sm btn-info">
+                                        <i class="bi bi-image"></i> Preview
+                                    </a>
+                                    <% } else { %>
+                                    <span class="text-muted">No preview</span>
+                                    <% } %>
+                                </td>
+                                <td>
+                                    <% if (model.stl_url) { %>
+                                    <a href="<%= model.stl_url %>" class="btn btn-sm btn-secondary" download>
+                                        <i class="bi bi-download"></i> STL
+                                    </a>
+                                    <% } %>
+                                    <% if (model.scad_url) { %>
+                                    <a href="<%= model.scad_url %>" class="btn btn-sm btn-secondary" download>
+                                        <i class="bi bi-download"></i> SCAD
+                                    </a>
+                                    <% } %>
+                                </td>
+                            </tr>
+                            <% }); %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Toggle user enabled status
+        document.querySelectorAll('.toggle-enabled').forEach(button => {
+            button.addEventListener('click', async (e) => {
+                const userId = e.target.dataset.userId;
+                const enabled = e.target.dataset.enabled === 'true';
+                
+                try {
+                    const response = await fetch(`/admin/users/${userId}/toggle-enabled`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled })
+                    });
+                    
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        alert('Failed to update user status');
+                    }
+                } catch (error) {
+                    alert('Error: ' + error.message);
+                }
+            });
+        });
+
+        // Toggle admin status
+        document.querySelectorAll('.toggle-admin').forEach(button => {
+            button.addEventListener('click', async (e) => {
+                const userId = e.target.dataset.userId;
+                const isAdmin = e.target.dataset.isAdmin === 'true';
+                
+                try {
+                    const response = await fetch(`/admin/users/${userId}/toggle-admin`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ isAdmin })
+                    });
+                    
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        alert('Failed to update admin status');
+                    }
+                } catch (error) {
+                    alert('Error: ' + error.message);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
