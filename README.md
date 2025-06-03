@@ -2,6 +2,8 @@
 
 Transform GeoJSON map data into 3D printable city models with artistic styling and real-time preview generation.
 
+Manifold on Debian https://lists.openscad.org/empathy/thread/D6KV3ZLXHLBHSITSQ5GPUZUKHURU4ABE
+
 ## Features
 
 - **Real-time 3D Preview**: See your city model update live as you adjust parameters
@@ -42,22 +44,26 @@ The application uses a sophisticated job management system that provides:
 ### Setup
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/yourusername/TerrainForge3D.git
 cd TerrainForge3D
 ```
 
 2. Install Python dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 3. Install Node.js dependencies:
+
 ```bash
 npm install
 ```
 
 4. Start the server:
+
 ```bash
 npm start
 ```
@@ -96,18 +102,21 @@ The server emits the following Socket.io events:
 ## Configuration Options
 
 ### Basic Options
+
 - `size` - Model size in mm (default: 200)
 - `height` - Maximum height in mm (default: 20)
 - `style` - Artistic style: modern, classic, minimal, block-combine
 - `detail` - Detail level 0-2 (default: 1.0)
 
 ### Building Options
+
 - `merge-distance` - Distance threshold for merging buildings
 - `cluster-size` - Size threshold for building clusters
 - `height-variance` - Height variation 0-1
 - `min-building-area` - Minimum building area in m²
 
 ### Infrastructure Options
+
 - `road-width` - Road width in mm
 - `water-depth` - Water depth in mm
 - `bridge-height` - Bridge deck height above base
@@ -115,6 +124,7 @@ The server emits the following Socket.io events:
 - `support-width` - Bridge support radius
 
 ### Preprocessing Options
+
 - `preprocess` - Enable preprocessing
 - `crop-distance` - Crop distance in meters
 - `crop-bbox` - Bounding box for cropping
@@ -155,6 +165,7 @@ To add support for new GeoJSON features:
 ### Testing
 
 Run the test suite:
+
 ```bash
 node test-job-system.js
 ```

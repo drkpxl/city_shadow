@@ -5,14 +5,36 @@ node_modules/
 outputs/
 uploads/
 Regions/
-lib/__pycache__/
-lib/feature_processor/__pycache__/
+**/__pycache__/
 .DS_Store
 temp/
 .env
+.env.*
 venv/
-__pycache__/
 *.pyc
 cache/
-.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated OpenSCAD files in root
+output_*.scad
+
+# Python specific
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+Thumbs.db
 
