@@ -422,10 +422,11 @@ app.post("/preview", ensureAuthenticated, async (req, res) => {
     await jobManager.setJobOutput(job.id, "previewFrame", 
       path.join(job.paths.outputDir, `${outputBase}_preview_frame.png`));
 
+    const userId = req.user.username || req.user.id || 'anonymous';
     res.json({
       jobId: job.id,
-      previewMain: `/temp/anonymous/${job.id}/output/${outputBase}_preview_main.png`,
-      previewFrame: `/temp/anonymous/${job.id}/output/${outputBase}_preview_frame.png`,
+      previewMain: `/temp/${userId}/${job.id}/output/${outputBase}_preview_main.png`,
+      previewFrame: `/temp/${userId}/${job.id}/output/${outputBase}_preview_frame.png`,
       stdout: result.stdout,
       stderr: result.stderr,
     });
@@ -467,13 +468,14 @@ app.post("/render", ensureAuthenticated, async (req, res) => {
     await jobManager.setJobOutput(job.id, "frameStl", 
       path.join(job.paths.outputDir, `${outputBase}_frame.stl`));
 
+    const userId = req.user.username || req.user.id || 'anonymous';
     res.json({
       jobId: job.id,
-      mainScad: `/temp/anonymous/${job.id}/output/${outputBase}_main.scad`,
-      frameScad: `/temp/anonymous/${job.id}/output/${outputBase}_frame.scad`,
+      mainScad: `/temp/${userId}/${job.id}/output/${outputBase}_main.scad`,
+      frameScad: `/temp/${userId}/${job.id}/output/${outputBase}_frame.scad`,
       stlFiles: {
-        mainStl: `/temp/anonymous/${job.id}/output/${outputBase}_main.stl`,
-        frameStl: `/temp/anonymous/${job.id}/output/${outputBase}_frame.stl`,
+        mainStl: `/temp/${userId}/${job.id}/output/${outputBase}_main.stl`,
+        frameStl: `/temp/${userId}/${job.id}/output/${outputBase}_frame.stl`,
       },
       stdout: result.stdout,
       stderr: result.stderr,
