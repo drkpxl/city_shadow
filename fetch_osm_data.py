@@ -13,6 +13,7 @@ import logging
 from shapely.geometry import shape, box, Point, LineString, Polygon, MultiPolygon, MultiLineString
 from shapely.ops import unary_union
 import warnings
+from osm_relation_builder import build_multipolygon_from_relation
 
 # Suppress shapely warnings
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -65,6 +66,8 @@ def build_overpass_query(bbox: Tuple[float, float, float, float], features: Dict
             f'  relation["natural"="water"]({bbox_str});',
             f'  way["waterway"]({bbox_str});',
             f'  relation["waterway"]({bbox_str});',
+            f'  way["waterway"="riverbank"]({bbox_str});',
+            f'  relation["waterway"="riverbank"]({bbox_str});',
             f'  way["natural"="coastline"]({bbox_str});'
         ])
     
@@ -85,7 +88,7 @@ def build_overpass_query(bbox: Tuple[float, float, float, float], features: Dict
     
     return "\n".join(query_parts)
 
-def osm_to_geojson_feature(element: Dict[str, Any], nodes: Dict[int, Tuple[float, float]]) -> Dict[str, Any]:
+def osm_to_geojson_feature(element: Dict[str, Any], nodes: Dict[int, Tuple[float, float]], ways: Dict[int, List[List[float]]] = None) -> Dict[str, Any]:
     """
     Convert an OSM element to a GeoJSON feature
     
@@ -134,12 +137,26 @@ def osm_to_geojson_feature(element: Dict[str, Any], nodes: Dict[int, Tuple[float
                     }
     
     elif element["type"] == "relation":
-        # For now, skip complex relation handling
-        # In a full implementation, we'd process multipolygons properly
-        feature["geometry"] = {
-            "type": "GeometryCollection",
-            "geometries": []
-        }
+        # Handle multipolygon relations (common for water bodies)
+        if element.get("tags", {}).get("type") == "multipolygon":
+            outer_ways = []
+            inner_ways = []
+            
+            # Collect all ways for this relation
+            for member in element.get("members", []):
+                if member["type"] == "way" and ways and member["ref"] in ways:
+                    way_coords = ways[member["ref"]]
+                    if len(way_coords) >= 2:  # Valid way
+                        if member["role"] == "outer":
+                            outer_ways.append(way_coords)
+                        elif member["role"] == "inner":
+                            inner_ways.append(way_coords)
+            
+            # Build multipolygon using the helper
+            if outer_ways:
+                geometry = build_multipolygon_from_relation(outer_ways, inner_ways)
+                if geometry:
+                    feature["geometry"] = geometry
     
     return feature
 
@@ -276,13 +293,25 @@ def convert_to_geojson(osm_data: Dict[str, Any], bbox: Tuple[float, float, float
         if element["type"] == "node":
             nodes[element["id"]] = (element["lon"], element["lat"])
     
+    # Build dictionary of ways for relation processing
+    ways = {}
+    for element in osm_data.get("elements", []):
+        if element["type"] == "way" and "nodes" in element:
+            way_coords = []
+            for node_id in element["nodes"]:
+                if node_id in nodes:
+                    lon, lat = nodes[node_id]
+                    way_coords.append([lon, lat])
+            if way_coords:
+                ways[element["id"]] = way_coords
+    
     # Convert elements to GeoJSON features
     features = []
     clipped_count = 0
     
     for element in osm_data.get("elements", []):
-        if element["type"] in ["way", "node"]:  # Skip relations for now
-            feature = osm_to_geojson_feature(element, nodes)
+        if element["type"] in ["way", "node", "relation"]:
+            feature = osm_to_geojson_feature(element, nodes, ways)
             if feature["geometry"] is not None:
                 # Clip geometry to bbox
                 clipped_geom = clip_geometry_to_bbox(feature["geometry"], bbox_polygon)
