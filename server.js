@@ -60,16 +60,19 @@ if (process.env.NODE_ENV !== 'production' && fs.existsSync(configPath)) {
 // Initialize Redis client for sessions (optional)
 // Comment out Redis for now - will use in-memory sessions
 let sessionStore;
-// if (process.env.REDIS_URL) {
-//   const redisClient = createClient({
-//     url: process.env.REDIS_URL
-//   });
-//   redisClient.connect().catch(console.error);
-//   sessionStore = new RedisStore({ 
-//     client: redisClient,
-//     prefix: "terrainforge3d:" 
-//   });
-// }
+if (process.env.REDIS_URL) {
+  const redisClient = createClient({
+    url: process.env.REDIS_URL
+  });
+  redisClient.connect().catch(console.error);
+  sessionStore = new RedisStore({
+    client: redisClient,
+    prefix: "terrainforge3d:"
+  });
+  console.log('Redis session storage enabled.');
+} else {
+  console.log('Using memory store for sessions. Configure REDIS_URL for persistent sessions in production.');
+}
 
 // Session configuration
 app.use(session({

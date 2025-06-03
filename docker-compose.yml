@@ -8,9 +8,11 @@ services:
     ports:
       - "${PORT}:${PORT}" # Map the host port to the container port (from .env)
     volumes:
-      - ./uploads:/app/uploads # Mount uploads directory
-      - ./outputs:/app/outputs # Mount outputs directory
-      - ./Regions:/app/Regions   # Mount Regions directory
+      - ./uploads:/app/uploads   # Mount uploads directory
+      - ./outputs:/app/outputs   # Mount outputs directory
+      - ./Regions:/app/Regions     # Mount Regions directory
+      - ./database:/app/database # Mount database directory for SQLite persistence
+      - ./temp:/app/temp         # Mount temp directory for job files persistence
     # Add any necessary proxy configurations here for Cloudflare Tunnels
     # For example, if you're using a local Cloudflare Tunnel client:
     # networks:
