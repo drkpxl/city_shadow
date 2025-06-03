@@ -3,8 +3,10 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>TerrainForge3D</title>
+  <title><%= typeof siteTitle !== 'undefined' ? siteTitle : 'TerrainForge3D' %></title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- Bootstrap Icons for tooltips -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -25,7 +27,7 @@
   <!-- Navigation Bar -->
   <nav class="navbar navbar-expand-lg navbar-light bg-light">
     <div class="container">
-      <a class="navbar-brand" href="/">TerrainForge3D</a>
+      <a class="navbar-brand" href="/"><%= typeof config !== 'undefined' && config.site ? config.site.title : 'TerrainForge3D' %></a>
       <div class="navbar-nav ml-auto">
         <span class="navbar-text mr-3">
           Welcome, <%= user.displayName || user.username %>
@@ -36,10 +38,8 @@
   </nav>
   
   <div class="container">
-    <h1 class="mt-5">TerrainForge3D</h1>
-    <p class="lead">Select an area on the map and choose features to include. Live previews and downloadable outputs
-      will
-      appear on the right.</p>
+    <h1 class="mt-5"><%= typeof config !== 'undefined' && config.site ? config.site.title : 'TerrainForge3D' %></h1>
+    <p class="lead"><%= typeof config !== 'undefined' && config.site ? config.site.tagline : 'Select an area on the map and choose features to include. Live previews and downloadable outputs will appear on the right.' %></p>
 
     <!-- Hidden field to store generated geojson file path -->
     <input type="hidden" id="generatedFile" name="generatedFile" value="">
@@ -52,7 +52,10 @@
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Selected Area</legend>
             <div class="form-group">
-              <label for="crop-bbox">Bounding Box</label>
+              <label for="crop-bbox">Bounding Box
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.tooltips ? config.tooltips.bbox_input : 'Bounding box coordinates in format: south,west,north,east (decimal degrees)' %>"></i>
+              </label>
               <input type="text" class="form-control" id="crop-bbox" name="crop-bbox"
                 placeholder="Select an area on the map" readonly>
               <small class="form-text text-muted">Format: south, west, north, east</small>
@@ -64,27 +67,48 @@
             <legend class="w-auto">OSM Features to Include</legend>
             <div class="form-group form-check">
               <input type="checkbox" class="form-check-input feature-select" id="include-buildings"
-                name="include-buildings" checked>
-              <label class="form-check-label" for="include-buildings">Buildings</label>
+                name="include-buildings" <%= typeof config !== 'undefined' && config.features && config.features.buildings ? (config.features.buildings.enabled ? 'checked' : '') : 'checked' %>>
+              <label class="form-check-label" for="include-buildings">
+                <%= typeof config !== 'undefined' && config.features && config.features.buildings ? config.features.buildings.label : 'Buildings' %>
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.features && config.features.buildings ? config.features.buildings.tooltip : 'Include all building footprints from OpenStreetMap' %>"></i>
+              </label>
             </div>
             <div class="form-group form-check">
               <input type="checkbox" class="form-check-input feature-select" id="include-roads" name="include-roads"
-                checked>
-              <label class="form-check-label" for="include-roads">Roads</label>
+                <%= typeof config !== 'undefined' && config.features && config.features.roads ? (config.features.roads.enabled ? 'checked' : '') : 'checked' %>>
+              <label class="form-check-label" for="include-roads">
+                <%= typeof config !== 'undefined' && config.features && config.features.roads ? config.features.roads.label : 'Roads' %>
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.features && config.features.roads ? config.features.roads.tooltip : 'Include roads, streets, and paths' %>"></i>
+              </label>
             </div>
             <div class="form-group form-check">
               <input type="checkbox" class="form-check-input feature-select" id="include-water" name="include-water"
-                checked>
-              <label class="form-check-label" for="include-water">Water Features</label>
+                <%= typeof config !== 'undefined' && config.features && config.features.water ? (config.features.water.enabled ? 'checked' : '') : 'checked' %>>
+              <label class="form-check-label" for="include-water">
+                <%= typeof config !== 'undefined' && config.features && config.features.water ? config.features.water.label : 'Water Features' %>
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.features && config.features.water ? config.features.water.tooltip : 'Include rivers, lakes, and coastlines' %>"></i>
+              </label>
             </div>
             <div class="form-group form-check">
               <input type="checkbox" class="form-check-input feature-select" id="include-railways"
-                name="include-railways" checked>
-              <label class="form-check-label" for="include-railways">Railways</label>
+                name="include-railways" <%= typeof config !== 'undefined' && config.features && config.features.railways ? (config.features.railways.enabled ? 'checked' : '') : 'checked' %>>
+              <label class="form-check-label" for="include-railways">
+                <%= typeof config !== 'undefined' && config.features && config.features.railways ? config.features.railways.label : 'Railways' %>
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.features && config.features.railways ? config.features.railways.tooltip : 'Include train tracks and rail lines' %>"></i>
+              </label>
             </div>
             <div class="form-group form-check">
-              <input type="checkbox" class="form-check-input feature-select" id="include-parks" name="include-parks">
-              <label class="form-check-label" for="include-parks">Parks & Leisure</label>
+              <input type="checkbox" class="form-check-input feature-select" id="include-parks" name="include-parks"
+                <%= typeof config !== 'undefined' && config.features && config.features.parks ? (config.features.parks.enabled ? 'checked' : '') : '' %>>
+              <label class="form-check-label" for="include-parks">
+                <%= typeof config !== 'undefined' && config.features && config.features.parks ? config.features.parks.label : 'Parks & Leisure' %>
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.features && config.features.parks ? config.features.parks.tooltip : 'Include parks and recreational areas' %>"></i>
+              </label>
             </div>
             <button type="button" id="fetchDataBtn" class="btn btn-primary btn-block" disabled>
               <span id="fetchBtnText">Select an area on the map first</span>
@@ -96,12 +120,26 @@
           <fieldset class="border p-3 mb-3">
             <legend class="w-auto">Basic Options</legend>
             <div class="form-group">
-              <label for="size">Model Size (mm)</label>
-              <input type="number" class="form-control live-preview" id="size" name="size" value="200" required>
+              <label for="size">Model Size (<%= typeof config !== 'undefined' && config.model && config.model.size ? config.model.size.unit : 'mm' %>)
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.model && config.model.size ? config.model.size.tooltip : 'Physical size of the longest side of your 3D model' %>"></i>
+              </label>
+              <input type="number" class="form-control live-preview" id="size" name="size" 
+                value="<%= typeof config !== 'undefined' && config.model && config.model.size ? config.model.size.default : 200 %>" 
+                min="<%= typeof config !== 'undefined' && config.model && config.model.size ? config.model.size.min : 50 %>"
+                max="<%= typeof config !== 'undefined' && config.model && config.model.size ? config.model.size.max : 500 %>"
+                required>
             </div>
             <div class="form-group">
-              <label for="height">Maximum Height (mm)</label>
-              <input type="number" class="form-control live-preview" id="height" name="height" value="20" required>
+              <label for="height">Maximum Height (<%= typeof config !== 'undefined' && config.model && config.model.building_height ? config.model.building_height.unit : 'mm' %>)
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.model && config.model.building_height ? config.model.building_height.tooltip : 'Default height for buildings without height data' %>"></i>
+              </label>
+              <input type="number" class="form-control live-preview" id="height" name="height" 
+                value="<%= typeof config !== 'undefined' && config.model && config.model.building_height ? config.model.building_height.default : 5 %>" 
+                min="<%= typeof config !== 'undefined' && config.model && config.model.building_height ? config.model.building_height.min : 1 %>"
+                max="<%= typeof config !== 'undefined' && config.model && config.model.building_height ? config.model.building_height.max : 50 %>"
+                required>
             </div>
             <div class="form-group">
               <label>
@@ -188,17 +226,30 @@
                 name="height-variance" value="0.2">
             </div>
             <div class="form-group">
-              <label for="road-width">Road Width (mm)</label>
+              <label for="road-width">Road Width (<%= typeof config !== 'undefined' && config.model && config.model.road_width ? config.model.road_width.unit : 'mm' %>)
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.model && config.model.road_width ? config.model.road_width.tooltip : 'Base width for roads' %>"></i>
+              </label>
               <input type="number" step="0.1" class="form-control live-preview" id="road-width" name="road-width"
-                value="1.2">
+                value="<%= typeof config !== 'undefined' && config.model && config.model.road_width ? config.model.road_width.default : 0.5 %>"
+                min="<%= typeof config !== 'undefined' && config.model && config.model.road_width ? config.model.road_width.min : 0.1 %>"
+                max="<%= typeof config !== 'undefined' && config.model && config.model.road_width ? config.model.road_width.max : 5.0 %>">
             </div>
             <div class="form-group">
-              <label for="water-depth">Water Depth (mm)</label>
+              <label for="water-depth">Water Depth (<%= typeof config !== 'undefined' && config.model && config.model.water_depth ? config.model.water_depth.unit : 'mm' %>)
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.model && config.model.water_depth ? config.model.water_depth.tooltip : 'Depth of water features below the base surface' %>"></i>
+              </label>
               <input type="number" step="0.1" class="form-control live-preview" id="water-depth" name="water-depth"
-                value="2">
+                value="<%= typeof config !== 'undefined' && config.model && config.model.water_depth ? config.model.water_depth.default : 0.5 %>"
+                min="<%= typeof config !== 'undefined' && config.model && config.model.water_depth ? config.model.water_depth.min : 0.1 %>"
+                max="<%= typeof config !== 'undefined' && config.model && config.model.water_depth ? config.model.water_depth.max : 5.0 %>">
             </div>
             <div class="form-group">
-              <label for="min-building-area">Minimum Building Area (m²)</label>
+              <label for="min-building-area">Minimum Building Area (m²)
+                <i class="bi bi-info-circle text-primary" data-toggle="tooltip" data-placement="top"
+                  title="<%= typeof config !== 'undefined' && config.model && config.model.building_min_size ? config.model.building_min_size.tooltip : 'Minimum building size to include. Smaller values preserve more detail.' %>"></i>
+              </label>
               <input type="number" step="0.1" class="form-control live-preview" id="min-building-area"
                 name="min-building-area" value="200.0">
             </div>

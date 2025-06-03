@@ -1,0 +1,171 @@
+# TerrainForge3D Configuration
+# This file contains all configurable settings for the application
+
+# Site branding and metadata
+site:
+  title: "TerrainForge3D"
+  tagline: "Transform real-world maps into stunning 3D printable terrain models"
+  footer_text: "Generate custom 3D terrain models from OpenStreetMap data"
+  version: "1.1.0"
+
+# Feature selection defaults
+features:
+  buildings:
+    enabled: true
+    label: "Buildings"
+    tooltip: "Include all building footprints from OpenStreetMap. Buildings will be extruded to their estimated heights."
+  roads:
+    enabled: true
+    label: "Roads"
+    tooltip: "Include roads, streets, and paths. Road width varies by type (highways wider than residential streets)."
+  water:
+    enabled: true
+    label: "Water Features"
+    tooltip: "Include rivers, lakes, ponds, and coastlines. Water features are rendered as recessed areas."
+  railways:
+    enabled: true
+    label: "Railways"
+    tooltip: "Include train tracks, subway lines, and tram rails. Railways are rendered as raised features."
+  parks:
+    enabled: false
+    label: "Parks & Leisure"
+    tooltip: "Include parks, gardens, and recreational areas. These are rendered at ground level with distinct textures."
+
+# Model generation parameters
+model:
+  # Basic parameters
+  size:
+    default: 200
+    min: 50
+    max: 500
+    unit: "mm"
+    tooltip: "Physical size of the longest side of your 3D model in millimeters"
+  
+  base_height:
+    default: 2
+    min: 0.5
+    max: 10
+    unit: "mm"
+    tooltip: "Thickness of the base plate. A thicker base provides more stability for printing."
+  
+  # Building parameters
+  building_height:
+    default: 5
+    min: 1
+    max: 50
+    unit: "mm"
+    tooltip: "Default height for buildings without height data. Taller buildings create more dramatic cityscapes."
+  
+  building_min_size:
+    default: 1.0
+    min: 0.1
+    max: 10.0
+    unit: "mm"
+    tooltip: "Minimum building size to include. Smaller values preserve more detail but may be hard to print."
+  
+  # Road parameters
+  road_width:
+    default: 0.5
+    min: 0.1
+    max: 5.0
+    unit: "mm"
+    tooltip: "Base width for roads. Actual width varies by road type (highways are wider)."
+  
+  road_height:
+    default: 0.2
+    min: 0.0
+    max: 2.0
+    unit: "mm"
+    tooltip: "Height of roads above the base. Set to 0 for engraved roads, positive for raised roads."
+  
+  # Water parameters
+  water_depth:
+    default: 0.5
+    min: 0.1
+    max: 5.0
+    unit: "mm"
+    tooltip: "Depth of water features below the base surface. Creates recessed areas for rivers and lakes."
+  
+  # Style options
+  merge_buildings:
+    default: true
+    tooltip: "Merge adjacent buildings into single shapes. Reduces complexity and improves printability."
+  
+  simplify_shapes:
+    default: true
+    tooltip: "Simplify complex geometries to improve 3D printing success and reduce file size."
+  
+  add_frame:
+    default: false
+    tooltip: "Add a decorative frame around the model. Useful for display pieces."
+  
+  frame_width:
+    default: 5
+    min: 1
+    max: 20
+    unit: "mm"
+    tooltip: "Width of the decorative frame (if enabled)"
+  
+  frame_height:
+    default: 3
+    min: 1
+    max: 10
+    unit: "mm"
+    tooltip: "Height of the decorative frame above the base (if enabled)"
+
+# Preview settings
+preview:
+  generate_3d:
+    default: true
+    tooltip: "Generate interactive 3D preview. May take longer for complex models."
+  
+  generate_top_view:
+    default: true
+    tooltip: "Generate top-down view image for quick preview."
+  
+  preview_quality:
+    default: "medium"
+    options: ["low", "medium", "high"]
+    tooltip: "3D preview quality. Higher quality takes longer to generate but shows more detail."
+
+# Processing limits
+limits:
+  max_area_sq_km: 100
+  max_buildings: 50000
+  max_processing_time_seconds: 600
+  
+# Error messages
+errors:
+  area_too_large: "Selected area is too large. Please select an area smaller than {max_area_sq_km} square kilometers."
+  no_data: "No OpenStreetMap data found for the selected area. Try a different location."
+  processing_timeout: "Processing took too long and was cancelled. Try selecting a smaller area or fewer features."
+  invalid_bbox: "Invalid bounding box. Please select an area on the map."
+
+# UI messages
+ui:
+  fetch_button:
+    idle: "Fetch OSM Data"
+    fetching: "Fetching data..."
+    no_selection: "Select an area on the map first"
+  
+  generate_button:
+    idle: "Generate 3D Model"
+    generating: "Generating model..."
+    no_data: "Fetch OSM data first"
+  
+  progress_messages:
+    fetching_osm: "Fetching OpenStreetMap data..."
+    processing_buildings: "Processing building footprints..."
+    processing_roads: "Processing road network..."
+    processing_water: "Processing water features..."
+    generating_3d: "Generating 3D geometry..."
+    creating_preview: "Creating preview..."
+    complete: "Model generation complete!"
+
+# Tooltips for additional controls
+tooltips:
+  bbox_input: "Bounding box coordinates in format: south,west,north,east (decimal degrees)"
+  job_history: "View and regenerate previous models"
+  download_scad: "Download OpenSCAD source file for customization"
+  download_stl: "Download STL file ready for 3D printing"
+  map_selection: "Click and drag to select an area. Right-click to clear selection."

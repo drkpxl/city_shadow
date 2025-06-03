@@ -12,6 +12,7 @@ const session = require('express-session');
 const passport = require('passport');
 const RedisStore = require('connect-redis').default;
 const { createClient } = require('redis');
+const yaml = require('js-yaml');
 const JobManager = require("./lib/jobManager");
 const ProcessManager = require("./lib/processManager");
 const { initializeAuth, ensureAuthenticated, ensureNotAuthenticated } = require('./config/auth');
@@ -25,6 +26,32 @@ const port = process.env.PORT || 3000;
 const jobManager = new JobManager();
 const processManager = new ProcessManager(5, 600000); // Max 5 concurrent, 10 min timeout
 jobManager.initialize().catch(console.error);
+
+// Load configuration
+let config = {};
+const configPath = path.join(__dirname, 'config.yaml');
+
+function loadConfig() {
+  try {
+    const configContent = fs.readFileSync(configPath, 'utf8');
+    config = yaml.load(configContent);
+    console.log('Configuration loaded from config.yaml');
+  } catch (err) {
+    console.error('Failed to load config.yaml:', err);
+    config = {}; // Use empty config as fallback
+  }
+}
+
+// Load config initially
+loadConfig();
+
+// Hot reload in development
+if (process.env.NODE_ENV !== 'production' && fs.existsSync(configPath)) {
+  fs.watchFile(configPath, () => {
+    console.log('Config file changed, reloading...');
+    loadConfig();
+  });
+}
 
 // Initialize Redis client for sessions (optional)
 // Comment out Redis for now - will use in-memory sessions
@@ -241,7 +268,11 @@ const runPythonProcessWithJob = async (jobId, args) => {
 
 // Public routes
 app.get("/login", ensureNotAuthenticated, (req, res) => {
-  res.render("pages/login", { user: null });
+  res.render("pages/login", { 
+    user: null,
+    config: config,
+    siteTitle: config.site?.title || "TerrainForge3D"
+  });
 });
 
 app.get("/auth/github", passport.authenticate("github", { scope: ["user:email"] }));
@@ -264,7 +295,11 @@ app.get("/logout", (req, res) => {
 
 // Protected routes
 app.get("/", ensureAuthenticated, (req, res) => {
-  res.render("index", { user: req.user });
+  res.render("index", { 
+    user: req.user,
+    config: config,
+    siteTitle: config.site?.title || "TerrainForge3D"
+  });
 });
 
 app.post("/uploadFile", ensureAuthenticated, upload.single("geojson"), (req, res) => {
