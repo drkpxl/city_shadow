@@ -175,7 +175,7 @@ def main():
 
         # Generate preview image.
         integration = OpenSCADIntegration()
-        preview_size = [1080, 1080]
+        preview_size = [600, 600]
         preview_file = args.output_scad.replace(".scad", "_preview.png")
         emit_progress(60, "Generating preview image")
         print("\nGenerating preview image...", flush=True)

@@ -39,7 +39,7 @@ class OpenSCADIntegration:
                 pass
         return None
 
-    def generate_preview(self, output_file, output_image, size=(1080, 1080)):
+    def generate_preview(self, output_file, output_image, size=(600, 600)):
         """Generate preview images using PreviewGenerator."""
         return self.preview_generator.generate(output_file, output_image, size)
 

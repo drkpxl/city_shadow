@@ -203,8 +203,11 @@
           </fieldset>
 
 
-          <!-- Final Render Button -->
-          <button type="button" id="renderBtn" class="btn btn-success mb-3">Render Final Model</button>
+          <!-- Preview and Render Buttons -->
+          <div class="d-flex gap-2 mb-3">
+            <button type="button" id="generatePreviewBtn" class="btn btn-primary">Generate Preview</button>
+            <button type="button" id="renderBtn" class="btn btn-success">Render Final Model</button>
+          </div>
         </form>
       </div>
 
@@ -228,12 +231,17 @@
           </div>
         </div>
 
-        <div class="processing-indicator">
-          Processing changes... Preview will update in 2 seconds.
+        <div class="processing-indicator" style="display: none;">
+          <i class="spinner-border spinner-border-sm" role="status"></i>
+          Generating preview...
         </div>
 
         <div class="preview-container">
-          <h3>Live Preview - Main Model</h3>
+          <h3>Preview - Main Model</h3>
+          <div id="previewPlaceholder" class="text-center p-5 border rounded bg-light">
+            <i class="bi bi-image" style="font-size: 3rem; color: #6c757d;"></i>
+            <p class="mt-3 text-muted">Click "Generate Preview" to see a preview of your model</p>
+          </div>
           <img id="previewMain" src="" alt="Main Model Preview" style="display: none;">
         </div>
 
@@ -275,7 +283,7 @@
     $('#select-all-roofs').on('click', function() {
       $('.roof-style-checkbox').prop('checked', true);
       updateRoofStyleDescription();
-      debouncedUpdatePreview();
+      // debouncedUpdatePreview(); // Removed automatic preview
     });
 
     // Handle clear all button
@@ -554,12 +562,18 @@
     socket.on('job-completed', (data) => {
       if (data.jobId === currentJobId) {
         updateLog('Job completed successfully!', 'success');
+        // Hide processing indicator and re-enable button
+        $(".processing-indicator").hide();
+        $("#generatePreviewBtn").prop('disabled', false).text('Generate Preview');
       }
     });
 
     socket.on('job-failed', (data) => {
       if (data.jobId === currentJobId) {
         updateLog(`Job failed: ${data.error}`, 'error');
+        // Hide processing indicator and re-enable button
+        $(".processing-indicator").hide();
+        $("#generatePreviewBtn").prop('disabled', false).text('Generate Preview');
       }
     });
 
@@ -613,9 +627,18 @@
           currentJobId = data.jobId;
           socket.emit('subscribe-job', currentJobId);
 
-          if (data.previewMain && data.previewFrame) {
+          if (data.previewMain) {
+            // Hide placeholder and show preview
+            $("#previewPlaceholder").hide();
             $("#previewMain").attr("src", data.previewMain + "?t=" + new Date().getTime()).show();
-            $("#previewFrame").attr("src", data.previewFrame + "?t=" + new Date().getTime()).show();
+            
+            // Hide processing indicator
+            $(".processing-indicator").hide();
+            
+            // Re-enable button
+            $("#generatePreviewBtn").prop('disabled', false).text('Generate Preview');
+            
+            updateLog("Preview generated successfully!", "success");
           }
 
           // Initial log output handled by socket events
@@ -629,6 +652,10 @@
             errorMessage += err.statusText || "Unknown error";
           }
           updateLog(errorMessage, "error");
+          
+          // Hide processing indicator and re-enable button
+          $(".processing-indicator").hide();
+          $("#generatePreviewBtn").prop('disabled', false).text('Generate Preview');
         }
       });
     }
@@ -698,7 +725,8 @@
           if (data.filePath) {
             $("#generatedFile").val(data.filePath);
             updateLog("OSM data fetched successfully!", "success");
-            debouncedUpdatePreview();
+            updateLog("Click 'Generate Preview' to see a preview of your model", "info");
+            // debouncedUpdatePreview(); // Removed automatic preview
           }
           
           // Re-enable button
@@ -724,16 +752,36 @@
       });
     });
 
-    // Update live preview when any option changes
-    $(".live-preview").on("change keyup", function () {
-      debouncedUpdatePreview();
-    });
+    // Remove automatic preview generation - now controlled by button
+    // $(".live-preview").on("change keyup", function () {
+    //   debouncedUpdatePreview();
+    // });
 
     // Scroll to bottom
     function scrollToBottom() {
       const logContainer = $("#liveLog");
       logContainer.scrollTop(logContainer[0].scrollHeight);
     }
+
+    // Handle Generate Preview button click
+    $("#generatePreviewBtn").on("click", function () {
+      var generatedFile = $("#generatedFile").val();
+      if (!generatedFile) {
+        alert("Please fetch OSM data first by selecting an area and clicking 'Fetch OSM Data'.");
+        return;
+      }
+
+      updateLog("Generating preview...");
+      
+      // Disable button during generation
+      $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status"></span> Generating...');
+      
+      // Show processing indicator
+      $(".processing-indicator").show();
+      
+      // Call the preview update function
+      updatePreview();
+    });
 
     // Handle final render button click
     $("#renderBtn").on("click", function () {
