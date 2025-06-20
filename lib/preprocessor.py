@@ -2,7 +2,6 @@
 from copy import deepcopy
 import json
 import statistics
-from math import radians, cos, sin, sqrt, pi
 from shapely.geometry import shape, mapping, box, Point
 
 
